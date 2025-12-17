@@ -1,2 +1,2 @@
 # northstar
-Que analyzer for StarRocks
+Query analyzer for StarRocks
