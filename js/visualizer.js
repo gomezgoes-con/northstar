@@ -7,10 +7,23 @@
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 65;
 const HORIZONTAL_SPACING = 40;
-const VERTICAL_SPACING = 80;
+const VERTICAL_SPACING = 100; // Increased to ensure edge labels are always visible
 
 // DOM elements
 let planDropZone, planFileInput, planContainer, planCanvas, planReset;
+
+// Camera-based viewport state
+let camera = { x: 0, y: 0, zoom: 1 };
+let currentContentSize = { width: 0, height: 0 };
+let viewportState = {
+  isPanning: false,
+  isSpacePressed: false,
+  startX: 0,
+  startY: 0,
+  startCameraX: 0,
+  startCameraY: 0,
+  pointerId: null
+};
 
 /**
  * Setup plan visualization drop zone
@@ -47,58 +60,265 @@ export function setupPlanDropZone() {
     planDropZone.style.display = 'block';
     planContainer.style.display = 'none';
     planCanvas.innerHTML = '';
+    // Reset camera state
+    camera = { x: 0, y: 0, zoom: 1 };
+    currentContentSize = { width: 0, height: 0 };
+    cleanupViewport();
   });
   
+  // Track expanded nodes and their widths
+  window.expandedNodes = new Set();
+
   // Global toggle function
   window.toggleNodeMetrics = function(nodeId, event) {
     event.stopPropagation();
     const dropdown = document.getElementById(`metrics-${nodeId}`);
     const icon = document.getElementById(`icon-${nodeId}`);
     const node = document.getElementById(`node-${nodeId}`);
-    
+
     if (!dropdown) return;
-    
+
     const isHidden = dropdown.style.display === 'none';
-    
-    // Close all other dropdowns first
-    document.querySelectorAll('.node-metrics-dropdown').forEach(d => {
-      d.style.display = 'none';
-    });
-    document.querySelectorAll('.expand-icon').forEach(i => {
-      i.textContent = '▼';
-    });
-    document.querySelectorAll('.plan-node').forEach(n => {
-      n.style.zIndex = '1';
-      n.style.width = '160px';
-    });
-    
-    // Toggle current one
+
+    // Toggle current node
     if (isHidden) {
       dropdown.style.display = 'block';
       icon.textContent = '▲';
       node.style.zIndex = '100';
       // Check if it's a join node (needs more width for predicates)
       const nodeTitle = node.querySelector('span')?.textContent || '';
-      const expandedWidth = nodeTitle.toUpperCase().includes('JOIN') ? '380px' : '320px';
-      node.style.width = expandedWidth;
+      const expandedWidth = nodeTitle.toUpperCase().includes('JOIN') ? 380 : 320;
+      node.style.width = expandedWidth + 'px';
+      window.expandedNodes.add(nodeId);
+
+      // Trigger layout recalculation
+      window.recalculateLayout?.();
+    } else {
+      // Close this node
+      dropdown.style.display = 'none';
+      icon.textContent = '▼';
+      node.style.zIndex = '1';
+      node.style.width = '160px';
+      window.expandedNodes.delete(nodeId);
+
+      // Trigger layout recalculation
+      window.recalculateLayout?.();
     }
   };
-  
-  // Close on outside click
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.plan-node')) {
-      document.querySelectorAll('.node-metrics-dropdown').forEach(d => {
-        d.style.display = 'none';
-      });
-      document.querySelectorAll('.expand-icon').forEach(i => {
-        i.textContent = '▼';
-      });
-      document.querySelectorAll('.plan-node').forEach(n => {
-        n.style.zIndex = '1';
-        n.style.width = '160px';
-      });
+}
+
+/**
+ * Convert screen coordinates to world coordinates
+ */
+function screenToWorld(screenX, screenY) {
+  return {
+    x: camera.x + screenX / camera.zoom,
+    y: camera.y + screenY / camera.zoom
+  };
+}
+
+/**
+ * Convert world coordinates to screen coordinates
+ */
+function worldToScreen(worldX, worldY) {
+  return {
+    x: (worldX - camera.x) * camera.zoom,
+    y: (worldY - camera.y) * camera.zoom
+  };
+}
+
+/**
+ * Apply camera transform to the zoom container
+ */
+function updateTransform() {
+  const zoomContainer = planCanvas?.querySelector('.zoom-container');
+  if (!zoomContainer) return;
+
+  // Apply transform: translate by negative camera position (scaled) then scale
+  zoomContainer.style.transform =
+    `translate(${-camera.x * camera.zoom}px, ${-camera.y * camera.zoom}px) scale(${camera.zoom})`;
+  zoomContainer.style.transformOrigin = '0 0';
+}
+
+/**
+ * Fit the visualization to the viewport
+ */
+function fitToView() {
+  if (!planCanvas) return;
+
+  const containerRect = planCanvas.getBoundingClientRect();
+  const contentWidth = currentContentSize.width;
+  const contentHeight = currentContentSize.height;
+
+  if (contentWidth === 0 || contentHeight === 0) return;
+
+  // Calculate scale to fit content in viewport with padding
+  const padding = 40;
+  const scaleX = (containerRect.width - padding * 2) / contentWidth;
+  const scaleY = (containerRect.height - padding * 2) / contentHeight;
+  const scale = Math.min(scaleX, scaleY, 1); // Don't zoom in beyond 100%
+
+  // Clamp scale to zoom limits
+  camera.zoom = Math.max(0.1, Math.min(8, scale));
+
+  // Center the content
+  // Camera x,y represents the top-left world coordinate visible at viewport top-left
+  // To center: we want (contentWidth * zoom) centered in containerRect.width
+  camera.x = -(containerRect.width / camera.zoom - contentWidth) / 2;
+  camera.y = -(containerRect.height / camera.zoom - contentHeight) / 2;
+
+  updateTransform();
+}
+
+/**
+ * Setup viewport interactions using Pointer Events
+ */
+function setupViewport() {
+  if (!planCanvas) return;
+
+  const zoomContainer = planCanvas.querySelector('.zoom-container');
+  if (!zoomContainer) return;
+
+  // Disable context menu for right-click panning
+  planCanvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+  });
+
+  // Double-click to fit view
+  planCanvas.addEventListener('dblclick', () => {
+    fitToView();
+  });
+
+  // Keyboard events for Space key
+  const handleKeyDown = (e) => {
+    if (e.code === 'Space' && !viewportState.isSpacePressed) {
+      e.preventDefault();
+      viewportState.isSpacePressed = true;
+      if (!viewportState.isPanning) {
+        planCanvas.style.cursor = 'grab';
+      }
+    }
+  };
+
+  const handleKeyUp = (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      viewportState.isSpacePressed = false;
+      if (!viewportState.isPanning) {
+        planCanvas.style.cursor = 'default';
+      }
+    }
+  };
+
+  window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('keyup', handleKeyUp);
+
+  // Store cleanup function
+  planCanvas._viewportCleanup = () => {
+    window.removeEventListener('keydown', handleKeyDown);
+    window.removeEventListener('keyup', handleKeyUp);
+  };
+
+  // Pointer down - start pan
+  planCanvas.addEventListener('pointerdown', (e) => {
+    // Left click with Space, or right click
+    const shouldPan = (e.button === 0 && viewportState.isSpacePressed) || e.button === 2;
+
+    if (shouldPan) {
+      e.preventDefault();
+      viewportState.isPanning = true;
+      viewportState.pointerId = e.pointerId;
+      viewportState.startX = e.clientX;
+      viewportState.startY = e.clientY;
+      viewportState.startCameraX = camera.x;
+      viewportState.startCameraY = camera.y;
+
+      planCanvas.style.cursor = 'grabbing';
+      planCanvas.setPointerCapture(e.pointerId);
     }
   });
+
+  // Pointer move - pan camera
+  planCanvas.addEventListener('pointermove', (e) => {
+    if (viewportState.isPanning && e.pointerId === viewportState.pointerId) {
+      e.preventDefault();
+
+      const dx = e.clientX - viewportState.startX;
+      const dy = e.clientY - viewportState.startY;
+
+      // Update camera position (negative because we're moving the viewport)
+      camera.x = viewportState.startCameraX - dx / camera.zoom;
+      camera.y = viewportState.startCameraY - dy / camera.zoom;
+
+      updateTransform();
+    }
+  });
+
+  // Pointer up - end pan
+  planCanvas.addEventListener('pointerup', (e) => {
+    if (viewportState.isPanning && e.pointerId === viewportState.pointerId) {
+      e.preventDefault();
+      viewportState.isPanning = false;
+      viewportState.pointerId = null;
+
+      planCanvas.style.cursor = viewportState.isSpacePressed ? 'grab' : 'default';
+      if (planCanvas.hasPointerCapture(e.pointerId)) {
+        planCanvas.releasePointerCapture(e.pointerId);
+      }
+    }
+  });
+
+  // Pointer cancel - end pan
+  planCanvas.addEventListener('pointercancel', (e) => {
+    if (viewportState.isPanning && e.pointerId === viewportState.pointerId) {
+      viewportState.isPanning = false;
+      viewportState.pointerId = null;
+      planCanvas.style.cursor = viewportState.isSpacePressed ? 'grab' : 'default';
+    }
+  });
+
+  // Wheel - zoom to cursor (reduced sensitivity: 3% per tick)
+  planCanvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const rect = planCanvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Get world position before zoom
+    const worldPos = screenToWorld(mouseX, mouseY);
+
+    // Calculate new zoom with reduced sensitivity (3% per tick instead of 10%)
+    const zoomDelta = e.deltaY > 0 ? 0.97 : 1.03;
+    const oldZoom = camera.zoom;
+    camera.zoom = Math.max(0.1, Math.min(8, camera.zoom * zoomDelta));
+
+    // Adjust camera position to keep world point under cursor
+    // worldX = camera.x + mouseX / oldZoom
+    // We want: worldX = camera.x_new + mouseX / newZoom
+    // Therefore: camera.x_new = worldX - mouseX / newZoom
+    camera.x = worldPos.x - mouseX / camera.zoom;
+    camera.y = worldPos.y - mouseY / camera.zoom;
+
+    updateTransform();
+  }, { passive: false });
+
+  // Set initial cursor
+  planCanvas.style.cursor = 'default';
+}
+
+/**
+ * Cleanup viewport event listeners
+ */
+function cleanupViewport() {
+  if (planCanvas && planCanvas._viewportCleanup) {
+    planCanvas._viewportCleanup();
+    delete planCanvas._viewportCleanup;
+  }
+  viewportState.isPanning = false;
+  viewportState.isSpacePressed = false;
+  viewportState.pointerId = null;
 }
 
 /**
@@ -223,12 +443,16 @@ function getScanMetrics(metricsData) {
   };
 }
 
+// Store current graph data for recalculation
+let currentGraph = null;
+let currentRoot = null;
+
 /**
  * Render from the Topology structure (logical plan)
  */
 function renderFromTopology(topology, metricsMap) {
   const { rootId, nodes } = topology;
-  
+
   const graph = {};
   for (const node of nodes) {
     graph[node.id] = {
@@ -240,18 +464,70 @@ function renderFromTopology(topology, metricsMap) {
       metrics: metricsMap[node.id] || null
     };
   }
-  
+
   const root = graph[rootId];
   if (!root) {
     alert('Could not find root node in topology');
     return;
   }
-  
+
+  // Store for recalculation
+  currentGraph = graph;
+  currentRoot = root;
+
+  // Setup recalculation function
+  window.recalculateLayout = function() {
+    if (!currentGraph || !currentRoot) return;
+    const layout = calculateTreeLayout(currentRoot, currentGraph);
+    renderTreeWithSVG(layout, currentGraph);
+  };
+
   const layout = calculateTreeLayout(root, graph);
   renderTreeWithSVG(layout, graph);
-  
+
   planDropZone.style.display = 'none';
   planContainer.style.display = 'block';
+}
+
+/**
+ * Get the effective width of a node (expanded or normal)
+ */
+function getNodeEffectiveWidth(node) {
+  const nodeId = String(node.id);
+  if (window.expandedNodes?.has(nodeId)) {
+    // Join nodes need more width for predicates
+    return node.name.toUpperCase().includes('JOIN') ? 380 : 320;
+  }
+  return NODE_WIDTH;
+}
+
+/**
+ * Get the effective height of a node (expanded or normal)
+ * Accounts for the metrics dropdown when expanded
+ */
+function getNodeEffectiveHeight(node) {
+  const nodeId = String(node.id);
+  if (!window.expandedNodes?.has(nodeId)) {
+    return NODE_HEIGHT;
+  }
+
+  // Calculate dropdown height based on node type
+  // Each metric row is approximately 22px (padding + font)
+  const ROW_HEIGHT = 22;
+  const DROPDOWN_MARGIN = 16; // margin-top + padding-top
+
+  const name = node.name.toUpperCase();
+  if (name.includes('SCAN')) {
+    return NODE_HEIGHT + DROPDOWN_MARGIN + (8 * ROW_HEIGHT); // 8 metrics rows
+  }
+  if (name.includes('JOIN')) {
+    return NODE_HEIGHT + DROPDOWN_MARGIN + (11 * ROW_HEIGHT); // 11 metrics rows
+  }
+  if (name.includes('EXCHANGE')) {
+    return NODE_HEIGHT + DROPDOWN_MARGIN + (10 * ROW_HEIGHT); // 10 metrics rows
+  }
+
+  return NODE_HEIGHT;
 }
 
 /**
@@ -259,54 +535,62 @@ function renderFromTopology(topology, metricsMap) {
  */
 function calculateTreeLayout(root, graph) {
   function calcSubtreeWidth(node, visited = new Set()) {
-    if (visited.has(node.id)) return NODE_WIDTH;
+    if (visited.has(node.id)) return getNodeEffectiveWidth(node);
     visited.add(node.id);
-    
+
+    const nodeWidth = getNodeEffectiveWidth(node);
+
     if (!node.children || node.children.length === 0) {
-      node._width = NODE_WIDTH;
-      return NODE_WIDTH;
+      node._width = nodeWidth;
+      node._nodeWidth = nodeWidth;
+      return nodeWidth;
     }
-    
-    let totalWidth = 0;
+
+    let totalChildrenWidth = 0;
     node.children.forEach((childId, i) => {
       const child = graph[childId];
       if (child) {
-        totalWidth += calcSubtreeWidth(child, visited);
-        if (i < node.children.length - 1) totalWidth += HORIZONTAL_SPACING;
+        totalChildrenWidth += calcSubtreeWidth(child, visited);
+        if (i < node.children.length - 1) totalChildrenWidth += HORIZONTAL_SPACING;
       }
     });
-    
-    node._width = Math.max(NODE_WIDTH, totalWidth);
+
+    node._width = Math.max(nodeWidth, totalChildrenWidth);
+    node._nodeWidth = nodeWidth;
     return node._width;
   }
-  
+
   calcSubtreeWidth(root);
-  
+
   const positions = {};
   let maxY = 0;
-  
+
   function assignPositions(node, x, y, visited = new Set()) {
     if (visited.has(node.id)) return;
     visited.add(node.id);
-    
-    positions[node.id] = { x: x + (node._width - NODE_WIDTH) / 2, y };
-    maxY = Math.max(maxY, y);
-    
+
+    const nodeWidth = node._nodeWidth || NODE_WIDTH;
+    const nodeHeight = getNodeEffectiveHeight(node);
+    positions[node.id] = { x: x + (node._width - nodeWidth) / 2, y };
+    maxY = Math.max(maxY, y + nodeHeight);
+
     if (node.children && node.children.length > 0) {
       let childX = x;
+      // Use effective height for vertical spacing
+      const childY = y + nodeHeight + VERTICAL_SPACING;
       node.children.forEach(childId => {
         const child = graph[childId];
         if (child) {
-          assignPositions(child, childX, y + NODE_HEIGHT + VERTICAL_SPACING, visited);
+          assignPositions(child, childX, childY, visited);
           childX += (child._width || NODE_WIDTH) + HORIZONTAL_SPACING;
         }
       });
     }
   }
-  
+
   assignPositions(root, 0, 0);
-  
-  return { positions, width: root._width, height: maxY + NODE_HEIGHT, root };
+
+  return { positions, width: root._width, height: maxY, root };
 }
 
 /**
@@ -703,16 +987,16 @@ function hasExpandableMetrics(node) {
 function renderTreeWithSVG(layout, graph) {
   const { positions, width, height, root } = layout;
   const padding = 40;
-  
+
   if (!root || Object.keys(positions).length === 0) {
     planCanvas.innerHTML = '<div style="padding:2rem;color:#f85149;">No operators found</div>';
     return;
   }
-  
+
   // Collect edges
   const edges = [];
   const visited = new Set();
-  
+
   function collectEdges(node) {
     if (visited.has(node.id)) return;
     visited.add(node.id);
@@ -727,100 +1011,163 @@ function renderTreeWithSVG(layout, graph) {
     }
   }
   collectEdges(root);
-  
-  // Render SVG edges with row count labels
+
+  // Render SVG edges (lines only) and collect label positions
   let edgeSvg = '';
+  let edgeLabelsHtml = '';
   for (const edge of edges) {
     const fromPos = positions[edge.from];
     const toPos = positions[edge.to];
-    if (fromPos && toPos) {
-      const x1 = fromPos.x + NODE_WIDTH / 2;
-      const y1 = fromPos.y + NODE_HEIGHT;
-      const x2 = toPos.x + NODE_WIDTH / 2;
+    const fromNode = graph[edge.from];
+    const toNode = graph[edge.to];
+    if (fromPos && toPos && fromNode && toNode) {
+      // Use effective dimensions for edge connection points
+      const fromWidth = getNodeEffectiveWidth(fromNode);
+      const fromHeight = getNodeEffectiveHeight(fromNode);
+      const toWidth = getNodeEffectiveWidth(toNode);
+      const x1 = fromPos.x + fromWidth / 2;
+      const y1 = fromPos.y + fromHeight;
+      const x2 = toPos.x + toWidth / 2;
       const y2 = toPos.y;
       const midY = (y1 + y2) / 2;
-      
-      // Draw the edge path
-      edgeSvg += `<path d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" fill="none" stroke="#30363d" stroke-width="1.5"/>`;
-      
+
+      // Draw the edge path - straight down then curve to child
+      // Control points ensure the line goes straight down from parent before curving
+      const dropY = y1 + 30; // Go straight down 30px before curving
+      edgeSvg += `<path d="M ${x1} ${y1} L ${x1} ${dropY} Q ${x1} ${midY}, ${(x1+x2)/2} ${midY} Q ${x2} ${midY}, ${x2} ${y2 - 20} L ${x2} ${y2}" fill="none" stroke="#30363d" stroke-width="1.5"/>`;
+
       // Get row count from the child node (source of data flow)
       const childNode = graph[edge.to];
       const rowCount = getNodeRowCount(childNode) || '0';
-      
+
       if (rowCount) {
-        // Calculate label position (on the bezier curve, slightly above midpoint)
+        // Calculate label position (centered in the gap between nodes)
         const labelX = (x1 + x2) / 2;
-        const labelY = midY - 5;
-        const labelWidth = rowCount.length * 7 + 12;
-        
-        edgeSvg += `
-          <rect x="${labelX - labelWidth/2}" y="${labelY - 10}" width="${labelWidth}" height="18" rx="4" fill="#161b22" stroke="#30363d" stroke-width="1"/>
-          <text x="${labelX}" y="${labelY + 2}" text-anchor="middle" fill="#a5d6ff" font-size="10" font-family="JetBrains Mono, monospace">${rowCount}</text>
+        const labelY = midY;
+
+        // Render label as HTML element with high z-index (always on top)
+        edgeLabelsHtml += `
+          <div style="
+            position: absolute;
+            left: ${labelX + padding}px;
+            top: ${labelY + padding - 9}px;
+            transform: translateX(-50%);
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #a5d6ff;
+            z-index: 200;
+            pointer-events: none;
+          ">${rowCount}</div>
         `;
       }
     }
   }
-  
+
   // Render nodes
   let nodesHtml = '';
   for (const [id, pos] of Object.entries(positions)) {
     const node = graph[id];
     if (!node) continue;
-    
+
     const nodeClass = getNodeClass(node.name);
     const displayName = node.name.length > 18 ? node.name.substring(0, 16) + '...' : node.name;
     const hasMetrics = hasExpandableMetrics(node);
     const metricsDropdown = buildMetricsDropdown(node);
     const totalTime = node.metrics ? getNodeTotalTime(node.metrics) : null;
-    
+
+    // Check if this node is expanded
+    const isExpanded = window.expandedNodes?.has(String(id));
+    const nodeWidth = isExpanded ? getNodeEffectiveWidth(node) : NODE_WIDTH;
+    const zIndex = isExpanded ? 100 : 1;
+    const dropdownDisplay = isExpanded ? 'block' : 'none';
+    const iconText = isExpanded ? '▲' : '▼';
+
     const nodeStyle = `
       position:absolute;
       left:${pos.x + padding}px;
       top:${pos.y + padding}px;
-      width:160px;
+      width:${nodeWidth}px;
       background:#161b22;
       border:1px solid #30363d;
       border-radius:8px;
       padding:8px 10px;
       text-align:center;
-      z-index:1;
+      z-index:${zIndex};
       ${hasMetrics ? 'cursor:pointer;' : ''}
     `;
-    
-    const borderColor = nodeClass === 'scan' ? '#d29922' : 
-                        nodeClass === 'join' ? '#f85149' : 
-                        nodeClass === 'exchange' ? '#58a6ff' : 
-                        nodeClass === 'aggregate' ? '#a371f7' : 
+
+    const borderColor = nodeClass === 'scan' ? '#d29922' :
+                        nodeClass === 'join' ? '#f85149' :
+                        nodeClass === 'exchange' ? '#58a6ff' :
+                        nodeClass === 'aggregate' ? '#a371f7' :
                         nodeClass === 'union' ? '#3fb950' : '#8b949e';
-    
+
     // Build time display - show in green if we have it
-    const timeDisplay = totalTime 
+    const timeDisplay = totalTime
       ? `<div style="font-size:10px;color:#3fb950;margin-top:2px;font-weight:500;">⏱ ${totalTime}</div>`
       : '';
-    
+
+    // Build metrics dropdown with correct display state
+    const metricsDropdownWithState = metricsDropdown.replace(
+      'style="display:none;',
+      `style="display:${dropdownDisplay};`
+    );
+
     nodesHtml += `
-      <div id="node-${id}" class="plan-node ${nodeClass} ${hasMetrics ? 'has-metrics' : ''}" 
+      <div id="node-${id}" class="plan-node ${nodeClass} ${hasMetrics ? 'has-metrics' : ''}"
            style="${nodeStyle}border-left:3px solid ${borderColor};"
            ${hasMetrics ? `onclick="toggleNodeMetrics('${id}', event)"` : ''}>
         <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
           <span style="font-size:11px;font-weight:600;color:#e6edf3;">${displayName}</span>
-          ${hasMetrics ? `<span id="icon-${id}" class="expand-icon" style="font-size:8px;color:#00d4aa;">▼</span>` : ''}
+          ${hasMetrics ? `<span id="icon-${id}" class="expand-icon" style="font-size:8px;color:#00d4aa;">${iconText}</span>` : ''}
         </div>
         <div style="font-size:10px;color:#8b949e;margin-top:2px;">id=${node.planNodeId}</div>
         ${timeDisplay}
-        ${metricsDropdown}
+        ${metricsDropdownWithState}
       </div>
     `;
   }
-  
+
+  // Store content size for camera calculations
+  currentContentSize = {
+    width: width + padding * 2,
+    height: height + padding * 2
+  };
+
+  // Check if viewport is already initialized (preserve camera on re-render)
+  const isInitialized = planCanvas.innerHTML !== '' && planCanvas._viewportCleanup;
+  const previousCamera = isInitialized ? { ...camera } : null;
+
   planCanvas.innerHTML = `
-    <div style="position:relative;width:${width + padding * 2}px;height:${height + padding * 2}px;">
+    <div class="zoom-container" style="position:relative;width:${width + padding * 2}px;height:${height + padding * 2}px;transform-origin:0 0;">
       <svg style="position:absolute;top:0;left:0;" width="${width + padding * 2}" height="${height + padding * 2}">
         <g transform="translate(${padding}, ${padding})">${edgeSvg}</g>
       </svg>
       <div style="position:absolute;top:0;left:0;width:${width + padding * 2}px;height:${height + padding * 2}px;">
         ${nodesHtml}
       </div>
+      <div style="position:absolute;top:0;left:0;width:${width + padding * 2}px;height:${height + padding * 2}px;pointer-events:none;">
+        ${edgeLabelsHtml}
+      </div>
     </div>
   `;
+
+  // Setup viewport if first time, or restore camera position
+  if (!isInitialized) {
+    setupViewport();
+    // Initial fit to view
+    setTimeout(() => fitToView(), 50);
+  } else {
+    // Restore camera after re-render (when nodes expand/collapse)
+    if (previousCamera) {
+      camera = previousCamera;
+    }
+    // Re-setup viewport event listeners (since DOM was replaced)
+    setupViewport();
+    updateTransform();
+  }
 }
