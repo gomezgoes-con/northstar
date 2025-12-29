@@ -25,12 +25,13 @@
   box-sizing: border-box;
 }
 
-body {
+html, body {
   font-family: 'JetBrains Mono', monospace;
   background: var(--bg-primary);
   color: var(--text-primary);
-  min-height: 100vh;
+  height: 100vh;
   line-height: 1.6;
+  overflow: hidden;
 }
 
 /* ========================================
@@ -69,6 +70,8 @@ main {
   max-width: 1800px;
   margin: 0 auto;
   padding: 2rem;
+  height: calc(100vh - 120px); /* Subtract header + tabs height */
+  overflow: hidden;
 }
 
 /* ========================================
@@ -482,10 +485,13 @@ td.rows {
 
 .tab-panel {
   display: none;
+  height: 100%;
 }
 
 .tab-panel.active {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 /* ========================================
@@ -702,6 +708,10 @@ td.rows {
    ======================================== */
 .plan-container {
   padding: 1rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .plan-header {
@@ -736,9 +746,12 @@ td.rows {
 }
 
 .plan-canvas {
-  overflow: auto;
-  padding: 2rem;
-  min-height: 600px;
+  overflow: hidden;
+  padding: 0;
+  flex: 1;
+  min-height: 0; /* Allow flex shrinking */
+  user-select: none;
+  /* Cursor is managed dynamically by viewport.js */
 }
 
 .plan-svg-container {
