@@ -24,6 +24,7 @@ export const JOIN_METRICS_CONFIG = [
 
   // === Build Side (HASH_JOIN_BUILD) ===
   { key: 'pushRowNum',           label: 'Push Rows',         source: 'build',   type: 'rows',      group: 'Build Side' },
+  { key: 'buildInputRows',       label: 'Input Rows',        source: 'build',   type: 'rows',      group: 'Build Side' },
   { key: 'hashTableMemoryUsage', label: 'HT Memory',         source: 'build',   type: 'bytes',     group: 'Build Side' },
   { key: 'peakRevocableMemoryBytes', label: 'Peak Revocable', source: 'build', type: 'bytes',     group: 'Build Side' },
   { key: 'operatorTotalTime',    label: 'Operator Time',     source: 'build',   type: 'timeWithPct', group: 'Build Side' },

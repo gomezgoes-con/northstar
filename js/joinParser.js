@@ -5,6 +5,102 @@
 import { parseNumericValue, formatBytes, formatTime } from './utils.js';
 
 /**
+ * Parse the Topology JSON string and build a node map
+ * Returns a Map of nodeId -> { id, name, children, properties }
+ */
+export function parseTopology(execution) {
+  if (!execution.Topology) {
+    return null;
+  }
+
+  try {
+    const topology = JSON.parse(execution.Topology);
+    const nodeMap = new Map();
+
+    for (const node of topology.nodes) {
+      nodeMap.set(String(node.id), {
+        id: String(node.id),
+        name: node.name,
+        children: (node.children || []).map(String),
+        properties: node.properties || {}
+      });
+    }
+
+    return nodeMap;
+  } catch (e) {
+    console.error('Failed to parse Topology:', e);
+    return null;
+  }
+}
+
+/**
+ * For a HASH_JOIN node, find the EXCHANGE child node (build side input)
+ * In topology, HASH_JOIN typically has 2 children: [probe_side, build_side]
+ * The build side often comes through an EXCHANGE for broadcast/shuffle joins
+ */
+export function findBuildSideExchange(joinNodeId, topologyMap) {
+  if (!topologyMap) return null;
+
+  const joinNode = topologyMap.get(joinNodeId);
+  if (!joinNode || joinNode.name !== 'HASH_JOIN') return null;
+
+  // HASH_JOIN has children [probe_child, build_child]
+  // The build side is typically the second child
+  if (joinNode.children.length < 2) return null;
+
+  const buildChildId = joinNode.children[1];
+  const buildChild = topologyMap.get(buildChildId);
+
+  // Check if build child is an EXCHANGE (for broadcast/shuffle joins)
+  if (buildChild && buildChild.name === 'EXCHANGE') {
+    return buildChildId;
+  }
+
+  // If not directly an EXCHANGE, traverse down to find one
+  // (e.g., might be PROJECT -> EXCHANGE)
+  let current = buildChild;
+  while (current && current.children.length > 0) {
+    const childId = current.children[0];
+    const child = topologyMap.get(childId);
+    if (child && child.name === 'EXCHANGE') {
+      return childId;
+    }
+    current = child;
+  }
+
+  return null;
+}
+
+/**
+ * Get EXCHANGE_SINK PushRowNum for a given plan_node_id
+ * This represents the rows BEFORE broadcast/shuffle
+ */
+export function getExchangeSinkPushRowNum(execution, exchangeNodeId) {
+  for (const fragKey of Object.keys(execution)) {
+    if (!fragKey.startsWith('Fragment ')) continue;
+
+    const fragment = execution[fragKey];
+
+    for (const pipeKey of Object.keys(fragment)) {
+      const pipeMatch = pipeKey.match(/Pipeline \(id=(\d+)\)/);
+      if (!pipeMatch) continue;
+
+      const pipeline = fragment[pipeKey];
+
+      for (const opKey of Object.keys(pipeline)) {
+        // Look for EXCHANGE_SINK with matching plan_node_id
+        if (opKey.includes('EXCHANGE_SINK') && opKey.includes(`plan_node_id=${exchangeNodeId}`)) {
+          const opData = pipeline[opKey];
+          return opData?.CommonMetrics?.PushRowNum || null;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Sum OperatorTotalTime for all operators with given plan_node_ids
  * Uses the same Fragment > Pipeline > Operator traversal as visualizer.js
  * Returns a Map of planNodeId -> total time in seconds
@@ -166,8 +262,9 @@ export function combineJoinOperators(probes, builds) {
  * Extract join metrics for display in the table
  * @param {Object} join - The join object with probe and build operators
  * @param {number} totalTimeSeconds - Total time from ALL operators with this plan_node_id
+ * @param {string|null} buildInputRows - Pre-broadcast/shuffle row count (from EXCHANGE_SINK)
  */
-export function extractJoinMetrics(join, totalTimeSeconds) {
+export function extractJoinMetrics(join, totalTimeSeconds, buildInputRows = null) {
   const probe = join.probe || {};
   const build = join.build || {};
   const probeCommon = probe.commonMetrics || {};
@@ -208,6 +305,7 @@ export function extractJoinMetrics(join, totalTimeSeconds) {
     // Build side metrics
     build: {
       pushRowNum: buildCommon.PushRowNum || '-',
+      buildInputRows: buildInputRows || '-',  // Pre-broadcast/shuffle rows
       hashTableMemoryUsage: buildUnique.HashTableMemoryUsage || '-',
       peakRevocableMemoryBytes: buildUnique.PeakRevocableMemoryBytes || '-',
       operatorTotalTime: buildTimeStr,
@@ -231,6 +329,9 @@ export function processJoinProfile(json) {
   const summary = query.Summary || {};
   const execution = query.Execution || {};
 
+  // Parse Topology to get node relationships
+  const topologyMap = parseTopology(execution);
+
   // Find all HASH_JOIN operators
   const { probes, builds } = findHashJoins(execution);
 
@@ -246,7 +347,17 @@ export function processJoinProfile(json) {
   // Extract metrics for each join, passing the total time from all operators
   const joinMetrics = joins.map(join => {
     const totalTime = totalTimesByPlanNodeId.get(join.planNodeId) || 0;
-    return extractJoinMetrics(join, totalTime);
+
+    // Find build side EXCHANGE and get pre-broadcast/shuffle row count
+    let buildInputRows = null;
+    if (topologyMap) {
+      const buildExchangeId = findBuildSideExchange(join.planNodeId, topologyMap);
+      if (buildExchangeId) {
+        buildInputRows = getExchangeSinkPushRowNum(execution, buildExchangeId);
+      }
+    }
+
+    return extractJoinMetrics(join, totalTime, buildInputRows);
   });
 
   console.log(`Found ${joins.length} HASH_JOIN operators`);
