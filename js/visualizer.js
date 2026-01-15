@@ -89,6 +89,7 @@ export function setupPlanDropZone() {
       dropdown.style.display = 'block';
       icon.textContent = '▲';
       node.style.zIndex = '100';
+      node.classList.add('expanded');
       // Check if it's a join node (needs more width for predicates)
       const nodeTitle = node.querySelector('span')?.textContent || '';
       const expandedWidth = nodeTitle.toUpperCase().includes('JOIN') ? '380px' : '320px';
@@ -97,24 +98,30 @@ export function setupPlanDropZone() {
       dropdown.style.display = 'none';
       icon.textContent = '▼';
       node.style.zIndex = '1';
+      node.classList.remove('expanded');
       node.style.width = '160px';
     }
   };
   
-  // Close on outside click
+  // Close nodes only when clicking outside the entire plan container
+  // (not when clicking empty space inside the canvas - that's for panning)
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.plan-node')) {
-      document.querySelectorAll('.node-metrics-dropdown').forEach(d => {
-        d.style.display = 'none';
-      });
-      document.querySelectorAll('.expand-icon').forEach(i => {
-        i.textContent = '▼';
-      });
-      document.querySelectorAll('.plan-node').forEach(n => {
-        n.style.zIndex = '1';
-        n.style.width = '160px';
-      });
+    // Don't close if clicking inside the plan container at all
+    if (e.target.closest('.plan-container')) {
+      return;
     }
+    // Close all expanded nodes when clicking outside
+    document.querySelectorAll('.node-metrics-dropdown').forEach(d => {
+      d.style.display = 'none';
+    });
+    document.querySelectorAll('.expand-icon').forEach(i => {
+      i.textContent = '▼';
+    });
+    document.querySelectorAll('.plan-node').forEach(n => {
+      n.style.zIndex = '1';
+      n.classList.remove('expanded');
+      n.style.width = '160px';
+    });
   });
 
   // Wire up toolbar buttons
@@ -369,8 +376,11 @@ function setupViewport() {
       const dx = e.clientX - viewportState.startX;
       const dy = e.clientY - viewportState.startY;
 
-      camera.x = viewportState.startCameraX - dx / camera.zoom;
-      camera.y = viewportState.startCameraY - dy / camera.zoom;
+      // Apply dampening to prevent overly sensitive panning when zoomed out
+      // Use sqrt of zoom to moderate the effect at extreme zoom levels
+      const sensitivity = Math.max(0.3, Math.sqrt(camera.zoom));
+      camera.x = viewportState.startCameraX - (dx / camera.zoom) * sensitivity;
+      camera.y = viewportState.startCameraY - (dy / camera.zoom) * sensitivity;
 
       clampCameraToBounds();
       updateTransform();
@@ -1004,24 +1014,74 @@ function getNodeRowCount(node) {
  */
 function formatRowCount(value) {
   if (!value) return null;
-  
+
   // Handle string values like "207.615K (207615)"
   let numStr = String(value);
-  
+
   // If it already has K/M suffix, extract just the short form
   const match = numStr.match(/^([\d.]+[KMB]?)/i);
   if (match) {
     return match[1];
   }
-  
+
   // Parse as number and format
   const num = parseFloat(numStr.replace(/[,\s]/g, ''));
   if (isNaN(num)) return value;
-  
+
   if (num >= 1000000000) return (num / 1000000000).toFixed(1) + 'B';
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
   return String(num);
+}
+
+/**
+ * Get raw numeric row count from a node
+ */
+function getNodeRowCountNumeric(node) {
+  if (!node || !node.metrics || !node.metrics.instances) return 0;
+
+  for (const inst of node.metrics.instances) {
+    const common = inst.metrics?.CommonMetrics;
+    if (common && common.PullRowNum) {
+      // Parse the raw value - handle "207.615K (207615)" format
+      const rawValue = String(common.PullRowNum);
+      // Try to extract number from parentheses first
+      const parenMatch = rawValue.match(/\((\d+)\)/);
+      if (parenMatch) return parseInt(parenMatch[1], 10);
+
+      // Otherwise parse the value directly
+      const num = parseFloat(rawValue.replace(/[,\s]/g, ''));
+      if (!isNaN(num)) {
+        // Handle K/M/B suffixes
+        if (rawValue.toUpperCase().includes('B')) return num * 1000000000;
+        if (rawValue.toUpperCase().includes('M')) return num * 1000000;
+        if (rawValue.toUpperCase().includes('K')) return num * 1000;
+        return num;
+      }
+    }
+  }
+  return 0;
+}
+
+/**
+ * Calculate edge stroke width based on row count
+ * Uses logarithmic scale: more rows = thicker edge
+ * Range: 1.5px (minimum) to 8px (maximum)
+ */
+function calculateEdgeWidth(rowCount) {
+  const MIN_WIDTH = 1.5;
+  const MAX_WIDTH = 8;
+
+  if (!rowCount || rowCount <= 0) return MIN_WIDTH;
+
+  // Use log10 scale: 1 row = 0, 10 rows = 1, 100 = 2, 1K = 3, 10K = 4, 100K = 5, 1M = 6, 10M = 7
+  const logValue = Math.log10(Math.max(1, rowCount));
+
+  // Map log scale (0-7) to width range
+  // 0 (1 row) -> MIN_WIDTH
+  // 7 (10M rows) -> MAX_WIDTH
+  const normalized = Math.min(logValue / 7, 1);
+  return MIN_WIDTH + (MAX_WIDTH - MIN_WIDTH) * normalized;
 }
 
 /**
@@ -1175,7 +1235,7 @@ function renderTreeWithSVG(layout, graph) {
   }
   collectEdges(root);
   
-  // Render SVG edges with row count labels
+  // Render SVG edges with row count labels and weighted widths
   let edgeSvg = '';
   for (const edge of edges) {
     const fromPos = positions[edge.from];
@@ -1186,23 +1246,27 @@ function renderTreeWithSVG(layout, graph) {
       const x2 = toPos.x + NODE_WIDTH / 2;
       const y2 = toPos.y;
       const midY = (y1 + y2) / 2;
-      
-      // Draw the edge path
-      edgeSvg += `<path d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" fill="none" stroke="#30363d" stroke-width="1.5"/>`;
-      
+
       // Get row count from the child node (source of data flow)
       const childNode = graph[edge.to];
-      const rowCount = getNodeRowCount(childNode) || '0';
-      
-      if (rowCount) {
+      const rowCountNumeric = getNodeRowCountNumeric(childNode);
+      const rowCountFormatted = getNodeRowCount(childNode) || '0';
+
+      // Calculate edge width based on row count (logarithmic scale)
+      const strokeWidth = calculateEdgeWidth(rowCountNumeric);
+
+      // Draw the edge path with weighted width
+      edgeSvg += `<path d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" fill="none" stroke="#30363d" stroke-width="${strokeWidth.toFixed(1)}" stroke-linecap="round"/>`;
+
+      if (rowCountFormatted) {
         // Calculate label position (on the bezier curve, slightly above midpoint)
         const labelX = (x1 + x2) / 2;
         const labelY = midY - 5;
-        const labelWidth = rowCount.length * 7 + 12;
-        
+        const labelWidth = rowCountFormatted.length * 7 + 12;
+
         edgeSvg += `
           <rect x="${labelX - labelWidth/2}" y="${labelY - 10}" width="${labelWidth}" height="18" rx="4" fill="#161b22" stroke="#30363d" stroke-width="1"/>
-          <text x="${labelX}" y="${labelY + 2}" text-anchor="middle" fill="#a5d6ff" font-size="10" font-family="JetBrains Mono, monospace">${rowCount}</text>
+          <text x="${labelX}" y="${labelY + 2}" text-anchor="middle" fill="#a5d6ff" font-size="10" font-family="JetBrains Mono, monospace">${rowCountFormatted}</text>
         `;
       }
     }
