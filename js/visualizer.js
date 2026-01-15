@@ -3,6 +3,8 @@
  * Renders the execution plan tree from the Topology structure
  */
 
+import { trackEvent } from './analytics.js';
+
 // Tree layout constants
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 65;
@@ -103,6 +105,7 @@ function loadPlanFile(file) {
     try {
       const data = JSON.parse(e.target.result);
       renderPlan(data);
+      trackEvent('upload-plan');
     } catch (err) {
       alert('Invalid JSON file');
     }

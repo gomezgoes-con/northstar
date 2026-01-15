@@ -9,6 +9,7 @@ import { initCompare } from './compare.js';
 import { setupPlanDropZone } from './visualizer.js';
 import { processJoinProfile } from './joinParser.js';
 import { renderJoinDashboard } from './joinRender.js';
+import { trackEvent } from './analytics.js';
 
 // ========================================
 // DOM Elements - Scan Summary Tab
@@ -76,13 +77,15 @@ function loadFile(file) {
     try {
       // Parse the JSON content
       const json = JSON.parse(e.target.result);
-      console.log('Loaded JSON:', json);
-      
+
       // Process the data
       const { summary, execution, connectorScans } = processQueryProfile(json);
-      
+
       // Render the dashboard
       renderDashboard(summary, execution, connectorScans, dropZone, dashboard);
+
+      // Track successful upload
+      trackEvent('upload-scan');
       
     } catch (error) {
       console.error('Error parsing JSON:', error);
@@ -101,11 +104,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // Update button states
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    
+
     // Show the selected tab panel
     const tabId = btn.dataset.tab;
     document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
     document.getElementById(`tab-${tabId}`).classList.add('active');
+
+    // Track tab switch
+    trackEvent(`tab-${tabId}`);
   });
 });
 
@@ -160,13 +166,15 @@ function loadJoinFile(file) {
     try {
       // Parse the JSON content
       const json = JSON.parse(e.target.result);
-      console.log('Loaded JSON for Join Analysis:', json);
 
       // Process the data for join analysis
       const { summary, execution, joins } = processJoinProfile(json);
 
       // Render the join dashboard
       renderJoinDashboard(summary, execution, joins, joinDropZone, joinDashboard);
+
+      // Track successful upload
+      trackEvent('upload-join');
 
     } catch (error) {
       console.error('Error parsing JSON:', error);
@@ -186,6 +194,4 @@ initCompare();
 
 // Initialize plan visualization
 setupPlanDropZone();
-
-console.log('NorthStar - Query Analyzer for StarRocks loaded!');
 

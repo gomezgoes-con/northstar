@@ -5,6 +5,7 @@
 import { parseNumericValue, sumMetric, formatNumber, formatBytes, formatTime } from './utils.js';
 import { findConnectorScans } from './scanParser.js';
 import { findHashJoins, combineJoinOperators, calculateJoinStats, sumOperatorTimesByPlanNodeId, extractJoinMetrics } from './joinParser.js';
+import { trackEvent } from './analytics.js';
 
 // Store loaded comparison data
 let compareData = {
@@ -99,6 +100,9 @@ function loadCompareFile(file, type, dropZone) {
         <p>${summary['Query ID'] || 'Unknown'}</p>
         <p>Duration: ${summary['Total'] || 'N/A'}</p>
       `;
+
+      // Track successful upload
+      trackEvent(`upload-compare-${type}`);
 
       // Check if both files are loaded
       if (compareData.baseline && compareData.optimized) {
