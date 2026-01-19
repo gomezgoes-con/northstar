@@ -8,7 +8,7 @@
  */
 export async function loadFromUrl(url) {
   // Detect URL type and load accordingly
-  if (url.includes('gist.github.com')) {
+  if (url.includes('gist.github.com') || url.includes('gist.githubusercontent.com')) {
     return await loadFromGist(url);
   } else if (url.includes('dpaste.com')) {
     return await loadFromDpaste(url);
@@ -26,18 +26,20 @@ async function loadFromGist(url) {
   // Handles multiple formats:
   // - https://gist.github.com/username/gist_id
   // - https://gist.github.com/username/gist_id/raw/...
+  // - https://gist.githubusercontent.com/username/gist_id/raw/...
   // - https://gist.github.com/gist_id (short format)
 
-  let match = url.match(/gist\.github\.com\/([a-f0-9]{32})/);
+  // Match 32-character hex ID (case-insensitive)
+  let match = url.match(/gist\.github(?:usercontent)?\.com\/([a-f0-9]{32})/i);
   if (!match) {
-    match = url.match(/gist\.github\.com\/[^/]+\/([a-f0-9]{32})/);
+    match = url.match(/gist\.github(?:usercontent)?\.com\/[^/]+\/([a-f0-9]{32})/i);
   }
 
   if (!match) {
     throw new Error('Invalid Gist URL format. Please provide a valid GitHub Gist URL.');
   }
 
-  const gistId = match[1];
+  const gistId = match[1].toLowerCase();
 
   // Always use GitHub API
   const response = await fetch(`https://api.github.com/gists/${gistId}`);
@@ -148,19 +150,34 @@ export function parseNorthStarUrl(hash) {
 
 /**
  * Extract Gist ID from any Gist URL format
+ * Handles both gist.github.com and gist.githubusercontent.com
  */
 export function extractGistId(url) {
-  let match = url.match(/gist\.github\.com\/([a-f0-9]{32})/);
+  // Match 32-character hex ID from both URL formats (case-insensitive)
+  let match = url.match(/gist\.github(?:usercontent)?\.com\/([a-f0-9]{32})/i);
   if (!match) {
-    match = url.match(/gist\.github\.com\/[^/]+\/([a-f0-9]{32})/);
+    match = url.match(/gist\.github(?:usercontent)?\.com\/[^/]+\/([a-f0-9]{32})/i);
   }
-  return match ? match[1] : null;
+
+  // Also handle NorthStar URL format: #gist:ID
+  if (!match) {
+    match = url.match(/#gist:([a-f0-9]{32})/i);
+  }
+
+  return match ? match[1].toLowerCase() : null;
 }
 
 /**
- * Extract paste ID from dpaste URL
+ * Extract paste ID from dpaste URL or NorthStar URL
  */
 export function extractPasteId(url) {
-  const match = url.match(/dpaste\.com\/([a-zA-Z0-9]+)/);
+  // First try dpaste.com URL format
+  let match = url.match(/dpaste\.com\/([a-zA-Z0-9]+)/);
+
+  // Also handle NorthStar URL format: #paste:ID
+  if (!match) {
+    match = url.match(/#paste:([a-zA-Z0-9]+)/);
+  }
+
   return match ? match[1] : null;
 }
