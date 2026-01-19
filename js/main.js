@@ -207,7 +207,7 @@ const globalLoadBtn = document.getElementById('globalLoadBtn');
 const globalShareBtn = document.getElementById('globalShareBtn');
 const globalFileInput = document.getElementById('globalFileInput');
 
-// Modal elements
+// Modal elements - Load Query
 const loadModal = document.getElementById('loadModal');
 const modalBackdrop = document.getElementById('modalBackdrop');
 const closeModal = document.getElementById('closeModal');
@@ -217,6 +217,12 @@ const urlInputContainer = document.getElementById('urlInputContainer');
 const urlInput = document.getElementById('urlInput');
 const btnLoadUrl = document.getElementById('btnLoadUrl');
 const btnCancelUrl = document.getElementById('btnCancelUrl');
+
+// Modal elements - Share Query
+const shareModal = document.getElementById('shareModal');
+const closeShareModal = document.getElementById('closeShareModal');
+const btnCancelShare = document.getElementById('btnCancelShare');
+const btnConfirmShare = document.getElementById('btnConfirmShare');
 
 // Set up global load button - opens modal
 globalLoadBtn.addEventListener('click', () => {
@@ -233,7 +239,15 @@ function closeLoadModal() {
 }
 
 closeModal.addEventListener('click', closeLoadModal);
-modalBackdrop.addEventListener('click', closeLoadModal);
+modalBackdrop.addEventListener('click', () => {
+  // Close whichever modal is open
+  if (loadModal.style.display === 'block') {
+    closeLoadModal();
+  }
+  if (shareModal.style.display === 'block') {
+    closeShareModalFn();
+  }
+});
 
 // Load from file option
 loadFromFile.addEventListener('click', () => {
@@ -331,19 +345,28 @@ globalShareBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Otherwise, confirm and create new dpaste
-  const confirmed = confirm(
-    'This will create a PUBLIC paste on dpaste.com.\n\n' +
-    'Anyone with the link can view your query profile.\n' +
-    'The paste will expire after 1 year.\n\n' +
-    'Do you want to continue?'
-  );
+  // Otherwise, show confirmation modal and create new dpaste
+  shareModal.style.display = 'block';
+  modalBackdrop.style.display = 'block';
+});
 
-  if (!confirmed) {
-    return;
-  }
+// Close share modal handlers
+function closeShareModalFn() {
+  shareModal.style.display = 'none';
+  modalBackdrop.style.display = 'none';
+}
+
+closeShareModal.addEventListener('click', closeShareModalFn);
+btnCancelShare.addEventListener('click', closeShareModalFn);
+
+// Confirm share - create dpaste
+btnConfirmShare.addEventListener('click', async () => {
+  const query = getQuery();
+  const originalText = globalShareBtn.textContent;
 
   try {
+    btnConfirmShare.textContent = 'Creating...';
+    btnConfirmShare.disabled = true;
     globalShareBtn.textContent = '⏳ Creating share link...';
     globalShareBtn.disabled = true;
 
@@ -360,6 +383,8 @@ globalShareBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(shareUrl);
 
     globalShareBtn.textContent = '✓ Link copied!';
+    closeShareModalFn();
+
     setTimeout(() => {
       globalShareBtn.textContent = originalText;
       globalShareBtn.disabled = false;
@@ -372,6 +397,9 @@ globalShareBtn.addEventListener('click', async () => {
     alert(`Failed to create share link: ${error.message}`);
     globalShareBtn.textContent = originalText;
     globalShareBtn.disabled = false;
+  } finally {
+    btnConfirmShare.textContent = 'Create Share Link';
+    btnConfirmShare.disabled = false;
   }
 });
 

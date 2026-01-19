@@ -57,6 +57,26 @@
     </div>
   </div>
 
+  <!-- Share Modal -->
+  <div class="modal" id="shareModal" style="display: none;">
+    <div class="modal-content">
+      <h2>Share Query Profile</h2>
+      <div class="share-warning">
+        <div class="warning-icon">⚠️</div>
+        <div class="warning-text">
+          <p><strong>This will create a PUBLIC paste on dpaste.com</strong></p>
+          <p>Anyone with the link can view your query profile.</p>
+          <p>The paste will expire after 1 year.</p>
+        </div>
+      </div>
+      <div class="share-actions">
+        <button class="btn-cancel" id="btnCancelShare">Cancel</button>
+        <button class="btn-confirm" id="btnConfirmShare">Create Share Link</button>
+      </div>
+      <button class="modal-close" id="closeShareModal">×</button>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="modalBackdrop" style="display: none;"></div>
 
   <!-- ========================================

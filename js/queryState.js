@@ -62,7 +62,8 @@ export function setQuery(queryJson, source = null) {
 
   // Update URL if source is provided
   if (source && (source.type === 'gist' || source.type === 'paste')) {
-    window.history.replaceState(null, '', `#${source.type}:${source.id}`);
+    const newUrl = `${window.location.origin}${window.location.pathname}#${source.type}:${source.id}`;
+    window.history.replaceState(null, '', newUrl);
   }
 
   // Notify all listeners

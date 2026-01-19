@@ -1305,3 +1305,62 @@ td.rows {
   background: var(--border);
 }
 
+/* Share Modal Styles */
+.share-warning {
+  display: flex;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.warning-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.warning-text p {
+  margin: 0 0 0.5rem 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.warning-text p:last-child {
+  margin-bottom: 0;
+}
+
+.warning-text strong {
+  color: var(--warning);
+}
+
+.share-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.btn-confirm {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--warning);
+  border: 1px solid var(--warning);
+  color: var(--bg-primary);
+  font-weight: 500;
+}
+
+.btn-confirm:hover {
+  opacity: 0.9;
+}
+
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
