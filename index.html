@@ -38,6 +38,7 @@
     <button class="tab-btn" data-tab="join">Join Summary</button>
     <button class="tab-btn" data-tab="compare">Query Comparison</button>
     <button class="tab-btn" data-tab="plan">Query Plan</button>
+    <button class="tab-btn" data-tab="raw">Raw JSON</button>
   </nav>
 
   <!-- ========================================
@@ -270,6 +271,19 @@
             <div class="minimap-nodes"></div>
             <div class="minimap-viewport"></div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== RAW JSON TAB ====== -->
+    <div class="tab-panel" id="tab-raw">
+      <div class="raw-container" id="rawContainer">
+        <div class="raw-header">
+          <h2>Raw Query JSON</h2>
+          <button class="btn-copy-raw" id="btnCopyRaw">📋 Copy to Clipboard</button>
+        </div>
+        <div class="raw-content">
+          <pre id="rawJsonContent"><code>No query loaded. Use the "Load Query" button above to load a query profile.</code></pre>
         </div>
       </div>
     </div>

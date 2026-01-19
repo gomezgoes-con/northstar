@@ -27,6 +27,12 @@ const joinFileInput = document.getElementById('joinFileInput');
 const joinDashboard = document.getElementById('joinDashboard');
 
 // ========================================
+// DOM Elements - Raw JSON Tab
+// ========================================
+const rawJsonContent = document.getElementById('rawJsonContent');
+const btnCopyRaw = document.getElementById('btnCopyRaw');
+
+// ========================================
 // File Loading - Drag and Drop
 // ========================================
 
@@ -296,8 +302,28 @@ function updateAllTabsWithQuery(json) {
     console.error('Error updating Join Summary tab:', error);
   }
 
+  // Update Raw JSON tab
+  try {
+    updateRawTab(json);
+  } catch (error) {
+    console.error('Error updating Raw JSON tab:', error);
+  }
+
   // Note: Compare tab remains independent (needs two queries)
   // Note: Plan tab updated via its own listener in visualizer.js
+}
+
+// Update the Raw JSON tab with formatted JSON
+function updateRawTab(json) {
+  const formatted = JSON.stringify(json, null, 2);
+  rawJsonContent.innerHTML = `<code>${escapeHtml(formatted)}</code>`;
+}
+
+// Escape HTML to prevent XSS (though we control the content)
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Clear all tabs
@@ -310,8 +336,33 @@ function clearAllTabs() {
   joinDropZone.style.display = 'block';
   joinDashboard.classList.remove('visible');
 
+  // Reset Raw JSON tab
+  rawJsonContent.innerHTML = '<code>No query loaded. Use the "Load Query" button above to load a query profile.</code>';
+
   // Plan tab cleared via its own listener in visualizer.js
 }
+
+// Copy raw JSON to clipboard
+btnCopyRaw.addEventListener('click', () => {
+  const query = getQuery();
+  if (!query) {
+    alert('No query loaded to copy');
+    return;
+  }
+
+  const jsonString = JSON.stringify(query, null, 2);
+  navigator.clipboard.writeText(jsonString).then(() => {
+    // Visual feedback
+    const originalText = btnCopyRaw.textContent;
+    btnCopyRaw.textContent = '✓ Copied!';
+    setTimeout(() => {
+      btnCopyRaw.textContent = originalText;
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy JSON:', err);
+    alert('Failed to copy JSON to clipboard');
+  });
+});
 
 // ========================================
 // Reset Buttons - Load New Profile

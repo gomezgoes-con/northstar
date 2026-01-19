@@ -1087,3 +1087,67 @@ td.rows {
   opacity: 0.8;
 }
 
+/* ========================================
+   Raw JSON Tab Styles
+   ======================================== */
+.raw-container {
+  padding: 1rem;
+}
+
+.raw-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.raw-header h2 {
+  color: var(--accent);
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+.btn-copy-raw {
+  padding: 0.5rem 1rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  transition: all 0.2s ease;
+}
+
+.btn-copy-raw:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary);
+}
+
+.raw-content {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  overflow: auto;
+  max-height: calc(100vh - 250px);
+}
+
+.raw-content pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.raw-content code {
+  font-family: inherit;
+  color: inherit;
+}
+
