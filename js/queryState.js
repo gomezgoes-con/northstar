@@ -2,13 +2,13 @@
  * Global Query State Management
  * Handles:
  * - Central query storage
- * - URL hash encoding/decoding for sharing
+ * - External URL references (gist/paste)
  * - State change notifications to all tabs
  *
- * Note: No localStorage persistence - queries only live in URL
+ * Note: No localStorage persistence - queries live in external services
  */
 
-const URL_HASH_PREFIX = 'q=';
+import { loadFromUrl, parseNorthStarUrl } from './urlLoader.js';
 
 // Current query JSON
 let currentQuery = null;
@@ -18,15 +18,23 @@ const listeners = [];
 
 /**
  * Initialize query state from URL only
- * localStorage is NOT used for auto-loading (only for URL sync)
+ * Checks for #gist:ID or #paste:ID format
  */
-export function initQueryState() {
-  // ONLY check URL hash - no localStorage auto-loading
-  const hashQuery = loadFromHash();
-  if (hashQuery) {
-    currentQuery = hashQuery;
-    notifyListeners();
-    return true;
+export async function initQueryState() {
+  const hash = window.location.hash;
+  if (!hash) return false;
+
+  try {
+    const parsed = parseNorthStarUrl(hash);
+    if (parsed) {
+      // Load from external URL (gist or paste)
+      const query = await loadFromUrl(parsed.url);
+      currentQuery = query;
+      notifyListeners();
+      return true;
+    }
+  } catch (error) {
+    console.error('Failed to load query from URL:', error);
   }
 
   return false;
@@ -43,9 +51,7 @@ export function getQuery() {
  * Set a new query (from file upload or other source)
  */
 export function setQuery(queryJson) {
-  console.log('setQuery called with data:', !!queryJson);
   currentQuery = queryJson;
-  console.log('currentQuery is now set:', !!currentQuery);
 
   // Notify all listeners
   notifyListeners();
@@ -92,49 +98,6 @@ function notifyListeners() {
 }
 
 /**
- * Encode JSON with LZ-String compression (accessed via window global)
- */
-function encodeQuery(json) {
-  console.log('encodeQuery called, LZString available:', !!window.LZString);
-  const jsonString = JSON.stringify(json);
-  console.log('JSON string length:', jsonString.length);
-  // Access LZString from window global (loaded via script tag)
-  const compressed = window.LZString.compressToEncodedURIComponent(jsonString);
-  console.log('Compressed length:', compressed.length);
-  return compressed;
-}
-
-/**
- * Decode LZ-String compressed data
- */
-function decodeQuery(encoded) {
-  // Access LZString from window global
-  const jsonString = window.LZString.decompressFromEncodedURIComponent(encoded);
-  if (!jsonString) {
-    throw new Error('Failed to decompress data');
-  }
-  return JSON.parse(jsonString);
-}
-
-/**
- * Load query from URL hash
- */
-function loadFromHash() {
-  try {
-    const hash = window.location.hash;
-    if (!hash || !hash.startsWith(`#${URL_HASH_PREFIX}`)) {
-      return null;
-    }
-
-    const encoded = hash.substring(URL_HASH_PREFIX.length + 1);
-    return decodeQuery(encoded);
-  } catch (error) {
-    console.error('Failed to decode query from URL:', error);
-    return null;
-  }
-}
-
-/**
  * Clear URL hash
  */
 function clearHash() {
@@ -150,24 +113,9 @@ export function hasQuery() {
 
 /**
  * Get a shareable URL for the current query
+ * This is now handled by the Share button which creates a paste
  */
 export function getShareableUrl() {
-  console.log('getShareableUrl called, currentQuery exists:', !!currentQuery);
-
-  if (!currentQuery) {
-    console.log('No query loaded!');
-    return window.location.origin + window.location.pathname;
-  }
-
-  try {
-    console.log('Encoding query...');
-    const encoded = encodeQuery(currentQuery);
-    console.log('Encoded length:', encoded.length);
-    const url = `${window.location.origin}${window.location.pathname}#${URL_HASH_PREFIX}${encoded}`;
-    console.log('Generated URL length:', url.length);
-    return url;
-  } catch (error) {
-    console.error('Failed to generate shareable URL:', error);
-    return window.location.origin + window.location.pathname;
-  }
+  // This function is no longer used - sharing is done via dpaste
+  return window.location.href;
 }

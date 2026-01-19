@@ -11,6 +11,7 @@ import { processJoinProfile } from './joinParser.js';
 import { renderJoinDashboard } from './joinRender.js';
 import { trackEvent } from './analytics.js';
 import { initQueryState, getQuery, setQuery, addListener, hasQuery, getShareableUrl } from './queryState.js';
+import { loadFromUrl, shareToDpaste, parseNorthStarUrl } from './urlLoader.js';
 
 // ========================================
 // DOM Elements - Scan Summary Tab
@@ -206,9 +207,80 @@ const globalLoadBtn = document.getElementById('globalLoadBtn');
 const globalShareBtn = document.getElementById('globalShareBtn');
 const globalFileInput = document.getElementById('globalFileInput');
 
-// Set up global load button
+// Modal elements
+const loadModal = document.getElementById('loadModal');
+const modalBackdrop = document.getElementById('modalBackdrop');
+const closeModal = document.getElementById('closeModal');
+const loadFromFile = document.getElementById('loadFromFile');
+const loadFromUrlBtn = document.getElementById('loadFromUrl');
+const urlInputContainer = document.getElementById('urlInputContainer');
+const urlInput = document.getElementById('urlInput');
+const btnLoadUrl = document.getElementById('btnLoadUrl');
+const btnCancelUrl = document.getElementById('btnCancelUrl');
+
+// Set up global load button - opens modal
 globalLoadBtn.addEventListener('click', () => {
+  loadModal.style.display = 'block';
+  modalBackdrop.style.display = 'block';
+});
+
+// Close modal
+function closeLoadModal() {
+  loadModal.style.display = 'none';
+  modalBackdrop.style.display = 'none';
+  urlInputContainer.style.display = 'none';
+  urlInput.value = '';
+}
+
+closeModal.addEventListener('click', closeLoadModal);
+modalBackdrop.addEventListener('click', closeLoadModal);
+
+// Load from file option
+loadFromFile.addEventListener('click', () => {
+  closeLoadModal();
   globalFileInput.click();
+});
+
+// Load from URL option
+loadFromUrlBtn.addEventListener('click', () => {
+  document.querySelector('.load-options').style.display = 'none';
+  urlInputContainer.style.display = 'block';
+  urlInput.focus();
+});
+
+// Cancel URL input
+btnCancelUrl.addEventListener('click', () => {
+  document.querySelector('.load-options').style.display = 'grid';
+  urlInputContainer.style.display = 'none';
+  urlInput.value = '';
+});
+
+// Load URL button
+btnLoadUrl.addEventListener('click', async () => {
+  const url = urlInput.value.trim();
+  if (!url) return;
+
+  try {
+    btnLoadUrl.textContent = 'Loading...';
+    btnLoadUrl.disabled = true;
+
+    const query = await loadFromUrl(url);
+
+    if (!query.Query) {
+      throw new Error('Invalid query profile format');
+    }
+
+    setQuery(query);
+    trackEvent('upload-url');
+    closeLoadModal();
+
+  } catch (error) {
+    console.error('Error loading from URL:', error);
+    alert(`Failed to load query: ${error.message}`);
+  } finally {
+    btnLoadUrl.textContent = 'Load';
+    btnLoadUrl.disabled = false;
+  }
 });
 
 // Handle global file selection
@@ -219,23 +291,46 @@ globalFileInput.addEventListener('change', (e) => {
   }
 });
 
-// Set up global share button
-globalShareBtn.addEventListener('click', () => {
-  const url = getShareableUrl();
-  console.log('Share URL:', url);
-  console.log('URL length:', url.length);
+// Set up global share button - creates dpaste and copies URL
+globalShareBtn.addEventListener('click', async () => {
+  const query = getQuery();
+  if (!query) {
+    alert('No query loaded to share');
+    return;
+  }
 
-  navigator.clipboard.writeText(url).then(() => {
-    // Visual feedback
-    const originalText = globalShareBtn.textContent;
-    globalShareBtn.textContent = '✓ Copied!';
+  const originalText = globalShareBtn.textContent;
+
+  try {
+    globalShareBtn.textContent = '⏳ Creating share link...';
+    globalShareBtn.disabled = true;
+
+    // Create paste on dpaste.com
+    const pasteUrl = await shareToDpaste(query);
+
+    // Extract paste ID from URL
+    const pasteId = pasteUrl.replace('https://dpaste.com/', '').replace('.txt', '');
+
+    // Generate NorthStar URL
+    const shareUrl = `${window.location.origin}${window.location.pathname}#paste:${pasteId}`;
+
+    // Copy to clipboard
+    await navigator.clipboard.writeText(shareUrl);
+
+    globalShareBtn.textContent = '✓ Link copied!';
     setTimeout(() => {
       globalShareBtn.textContent = originalText;
+      globalShareBtn.disabled = false;
     }, 2000);
-  }).catch(err => {
-    console.error('Failed to copy URL:', err);
-    alert('Failed to copy URL to clipboard');
-  });
+
+    trackEvent('share-dpaste');
+
+  } catch (error) {
+    console.error('Failed to create share link:', error);
+    alert(`Failed to create share link: ${error.message}`);
+    globalShareBtn.textContent = originalText;
+    globalShareBtn.disabled = false;
+  }
 });
 
 // Load file into global state
@@ -392,7 +487,10 @@ initCompare();
 // Initialize plan visualization (sets up listener for global state)
 setupPlanDropZone();
 
-// Initialize query state from URL or localStorage
+// Initialize query state from URL (#gist:ID or #paste:ID)
 // This MUST be called AFTER all listeners are set up so they receive the initial state
-initQueryState();
+// It's async now because it loads from external URLs
+initQueryState().catch(err => {
+  console.error('Failed to initialize query state:', err);
+});
 
