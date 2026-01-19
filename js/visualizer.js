@@ -85,12 +85,6 @@ export function setupPlanDropZone() {
       planCanvas.innerHTML = '';
     }
   });
-
-  // On init, if we have a query, render it
-  const currentQuery = getQuery();
-  if (currentQuery) {
-    renderPlan(currentQuery);
-  }
   
   // Global toggle function
   window.toggleNodeMetrics = function(nodeId, event) {

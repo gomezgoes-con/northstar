@@ -206,9 +206,6 @@ const globalLoadBtn = document.getElementById('globalLoadBtn');
 const globalShareBtn = document.getElementById('globalShareBtn');
 const globalFileInput = document.getElementById('globalFileInput');
 
-// Initialize query state (from URL or localStorage)
-initQueryState();
-
 // Set up global load button
 globalLoadBtn.addEventListener('click', () => {
   globalFileInput.click();
@@ -392,11 +389,7 @@ initCompare();
 // Initialize plan visualization (sets up listener for global state)
 setupPlanDropZone();
 
-// On page load, if we have a query in state, load it
-// This must be AFTER setupPlanDropZone() so all listeners are registered
-if (hasQuery()) {
-  const query = getQuery();
-  updateAllTabsWithQuery(query);
-  globalShareBtn.style.display = 'block';
-}
+// Initialize query state from URL or localStorage
+// This MUST be called AFTER all listeners are set up so they receive the initial state
+initQueryState();
 

@@ -138,7 +138,7 @@ function loadFromLocalStorage() {
 
 /**
  * Update URL hash with current query
- * Uses base64 encoding (with URL-safe characters)
+ * Uses LZ-String compression + URI encoding for short URLs
  */
 function updateHash() {
   if (!currentQuery) {
@@ -148,12 +148,9 @@ function updateHash() {
 
   try {
     const jsonString = JSON.stringify(currentQuery);
-    const base64 = btoa(jsonString)
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, ''); // Remove padding
-
-    window.history.replaceState(null, '', `#${URL_HASH_PREFIX}${base64}`);
+    // Use LZString compression (like Excalidraw) for much shorter URLs
+    const compressed = LZString.compressToEncodedURIComponent(jsonString);
+    window.history.replaceState(null, '', `#${URL_HASH_PREFIX}${compressed}`);
   } catch (error) {
     console.error('Failed to encode query in URL:', error);
     clearHash();
@@ -170,15 +167,16 @@ function loadFromHash() {
       return null;
     }
 
-    const base64 = hash.substring(URL_HASH_PREFIX.length + 1);
+    const compressed = hash.substring(URL_HASH_PREFIX.length + 1);
 
-    // Restore padding and convert URL-safe characters back
-    const paddedBase64 = base64
-      .replace(/-/g, '+')
-      .replace(/_/g, '/')
-      .padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+    // Decompress using LZString
+    const jsonString = LZString.decompressFromEncodedURIComponent(compressed);
 
-    const jsonString = atob(paddedBase64);
+    if (!jsonString) {
+      console.error('Failed to decompress query from URL');
+      return null;
+    }
+
     return JSON.parse(jsonString);
   } catch (error) {
     console.error('Failed to decode query from URL:', error);
