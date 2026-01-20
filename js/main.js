@@ -112,24 +112,42 @@ function loadFile(file) {
 // ========================================
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    // Update button states
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-
-    // Show the selected tab panel
-    const tabId = btn.dataset.tab;
-    document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
-    document.getElementById(`tab-${tabId}`).classList.add('active');
-
-    // Refresh plan view when switching to Plan tab (fixes layout calculated while hidden)
-    if (tabId === 'plan') {
-      refreshPlanView();
-    }
-
-    // Track tab switch
-    trackEvent(`tab-${tabId}`);
+    switchToTab(btn.dataset.tab);
   });
 });
+
+/**
+ * Get the current active tab ID
+ */
+function getCurrentTab() {
+  const activeBtn = document.querySelector('.tab-btn.active');
+  return activeBtn ? activeBtn.dataset.tab : 'single';
+}
+
+/**
+ * Switch to a specific tab by ID
+ * Valid tabs: single, join, plan, raw, compare
+ */
+function switchToTab(tabId) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+  if (!btn) return;
+
+  // Update button states
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Show the selected tab panel
+  document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+  document.getElementById(`tab-${tabId}`).classList.add('active');
+
+  // Refresh plan view when switching to Plan tab (fixes layout calculated while hidden)
+  if (tabId === 'plan') {
+    refreshPlanView();
+  }
+
+  // Track tab switch
+  trackEvent(`tab-${tabId}`);
+}
 
 // ========================================
 // Join Summary Tab - File Loading
@@ -336,7 +354,8 @@ globalShareBtn.addEventListener('click', async () => {
 
   // If query was loaded from gist/paste, reuse that URL
   if (source && (source.type === 'gist' || source.type === 'paste')) {
-    const shareUrl = `${window.location.origin}${window.location.pathname}#${source.type}:${source.id}`;
+    const currentTab = getCurrentTab();
+    const shareUrl = `${window.location.origin}${window.location.pathname}#${source.type}:${source.id}&tab=${currentTab}`;
 
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -383,8 +402,9 @@ btnConfirmShare.addEventListener('click', async () => {
     // Extract paste ID from URL
     const pasteId = pasteUrl.replace('https://dpaste.com/', '').replace('.txt', '');
 
-    // Generate NorthStar URL
-    const shareUrl = `${window.location.origin}${window.location.pathname}#paste:${pasteId}`;
+    // Generate NorthStar URL with current tab
+    const currentTab = getCurrentTab();
+    const shareUrl = `${window.location.origin}${window.location.pathname}#paste:${pasteId}&tab=${currentTab}`;
 
     // Copy to clipboard
     await navigator.clipboard.writeText(shareUrl);
@@ -564,10 +584,15 @@ initCompare();
 // Initialize plan visualization (sets up listener for global state)
 setupPlanDropZone();
 
-// Initialize query state from URL (#gist:ID or #paste:ID)
+/// Initialize query state from URL (#gist:ID or #paste:ID)
 // This MUST be called AFTER all listeners are set up so they receive the initial state
 // It's async now because it loads from external URLs
-initQueryState().catch(err => {
+initQueryState().then(({ loaded, tab }) => {
+  // Switch to the tab specified in URL (if any)
+  if (loaded && tab) {
+    switchToTab(tab);
+  }
+}).catch(err => {
   console.error('Failed to initialize query state:', err);
 });
 

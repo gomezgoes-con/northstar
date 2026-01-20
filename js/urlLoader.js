@@ -127,6 +127,7 @@ export async function shareToDpaste(queryJson) {
 /**
  * Parse a NorthStar URL and extract the external URL reference
  * Format: http://localhost:8000/#gist:ID or #paste:ID
+ * Optional tab parameter: #gist:ID&tab=plan or #paste:ID&tab=join
  */
 export function parseNorthStarUrl(hash) {
   if (!hash) return null;
@@ -134,13 +135,22 @@ export function parseNorthStarUrl(hash) {
   // Remove leading #
   hash = hash.replace(/^#/, '');
 
+  // Extract tab parameter if present (e.g., &tab=plan)
+  let tab = null;
+  const tabMatch = hash.match(/&tab=([a-z]+)/);
+  if (tabMatch) {
+    tab = tabMatch[1];
+    hash = hash.replace(/&tab=[a-z]+/, ''); // Remove tab from hash for ID extraction
+  }
+
   // Check for gist: or paste: prefix
   if (hash.startsWith('gist:')) {
     const gistId = hash.substring(5);
     return {
       type: 'gist',
       id: gistId,
-      url: `https://api.github.com/gists/${gistId}` // Use API URL
+      url: `https://api.github.com/gists/${gistId}`, // Use API URL
+      tab
     };
   }
 
@@ -149,7 +159,8 @@ export function parseNorthStarUrl(hash) {
     return {
       type: 'paste',
       id: pasteId,
-      url: `https://dpaste.com/${pasteId}`
+      url: `https://dpaste.com/${pasteId}`,
+      tab
     };
   }
 

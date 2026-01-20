@@ -22,10 +22,11 @@ const listeners = [];
 /**
  * Initialize query state from URL only
  * Checks for #gist:ID or #paste:ID format
+ * Returns { loaded: boolean, tab: string|null } with optional tab to switch to
  */
 export async function initQueryState() {
   const hash = window.location.hash;
-  if (!hash) return false;
+  if (!hash) return { loaded: false, tab: null };
 
   try {
     const parsed = parseNorthStarUrl(hash);
@@ -35,13 +36,13 @@ export async function initQueryState() {
       currentQuery = query;
       querySource = parsed; // Store source for reuse
       notifyListeners();
-      return true;
+      return { loaded: true, tab: parsed.tab };
     }
   } catch (error) {
     console.error('Failed to load query from URL:', error);
   }
 
-  return false;
+  return { loaded: false, tab: null };
 }
 
 /**
