@@ -329,7 +329,15 @@
       <div class="raw-container" id="rawContainer">
         <div class="raw-header">
           <h2>Raw Query JSON</h2>
-          <button class="btn-copy-raw" id="btnCopyRaw">📋 Copy to Clipboard</button>
+          <div class="raw-header-actions">
+            <div class="raw-search">
+              <input type="text" id="rawSearchInput" placeholder="Search JSON..." />
+              <span class="search-count" id="rawSearchCount"></span>
+              <button class="btn-search-nav" id="rawSearchPrev" title="Previous">&#9650;</button>
+              <button class="btn-search-nav" id="rawSearchNext" title="Next">&#9660;</button>
+            </div>
+            <button class="btn-copy-raw" id="btnCopyRaw">Copy to Clipboard</button>
+          </div>
         </div>
         <div class="raw-content">
           <pre id="rawJsonContent"><code>No query loaded. Use the "Load Query" button above to load a query profile.</code></pre>

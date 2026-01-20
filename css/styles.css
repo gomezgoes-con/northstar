@@ -1143,6 +1143,72 @@ td.rows {
   margin: 0;
 }
 
+.raw-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.raw-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+}
+
+.raw-search input {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  width: 150px;
+  outline: none;
+}
+
+.raw-search input::placeholder {
+  color: var(--text-secondary);
+}
+
+.search-count {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  min-width: 50px;
+  text-align: center;
+}
+
+.btn-search-nav {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.25rem;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.btn-search-nav:hover {
+  color: var(--accent);
+}
+
+.btn-search-nav:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.raw-content .search-highlight {
+  background: rgba(210, 153, 34, 0.4);
+  border-radius: 2px;
+}
+
+.raw-content .search-highlight.current {
+  background: var(--warning);
+  color: var(--bg-primary);
+}
+
 .btn-copy-raw {
   padding: 0.5rem 1rem;
   background: var(--bg-tertiary);

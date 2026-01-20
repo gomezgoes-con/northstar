@@ -12,6 +12,7 @@ import { renderJoinDashboard } from './joinRender.js';
 import { trackEvent } from './analytics.js';
 import { initQueryState, getQuery, setQuery, addListener, hasQuery, getShareableUrl, getQuerySource } from './queryState.js';
 import { loadFromUrl, shareToDpaste, parseNorthStarUrl, extractGistId, extractPasteId } from './urlLoader.js';
+import { initRawJson, updateRawTab, clearRawTab } from './rawJson.js';
 
 // ========================================
 // DOM Elements - Scan Summary Tab
@@ -26,12 +27,6 @@ const dashboard = document.getElementById('dashboard');
 const joinDropZone = document.getElementById('joinDropZone');
 const joinFileInput = document.getElementById('joinFileInput');
 const joinDashboard = document.getElementById('joinDashboard');
-
-// ========================================
-// DOM Elements - Raw JSON Tab
-// ========================================
-const rawJsonContent = document.getElementById('rawJsonContent');
-const btnCopyRaw = document.getElementById('btnCopyRaw');
 
 // ========================================
 // File Loading - Drag and Drop
@@ -505,19 +500,6 @@ function updateAllTabsWithQuery(json) {
   // Note: Plan tab updated via its own listener in visualizer.js
 }
 
-// Update the Raw JSON tab with formatted JSON
-function updateRawTab(json) {
-  const formatted = JSON.stringify(json, null, 2);
-  rawJsonContent.innerHTML = `<code>${escapeHtml(formatted)}</code>`;
-}
-
-// Escape HTML to prevent XSS (though we control the content)
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
 // Clear all tabs
 function clearAllTabs() {
   // Reset Scan Summary
@@ -529,32 +511,10 @@ function clearAllTabs() {
   joinDashboard.classList.remove('visible');
 
   // Reset Raw JSON tab
-  rawJsonContent.innerHTML = '<code>No query loaded. Use the "Load Query" button above to load a query profile.</code>';
+  clearRawTab();
 
   // Plan tab cleared via its own listener in visualizer.js
 }
-
-// Copy raw JSON to clipboard
-btnCopyRaw.addEventListener('click', () => {
-  const query = getQuery();
-  if (!query) {
-    alert('No query loaded to copy');
-    return;
-  }
-
-  const jsonString = JSON.stringify(query, null, 2);
-  navigator.clipboard.writeText(jsonString).then(() => {
-    // Visual feedback
-    const originalText = btnCopyRaw.textContent;
-    btnCopyRaw.textContent = '✓ Copied!';
-    setTimeout(() => {
-      btnCopyRaw.textContent = originalText;
-    }, 2000);
-  }).catch(err => {
-    console.error('Failed to copy JSON:', err);
-    alert('Failed to copy JSON to clipboard');
-  });
-});
 
 // ========================================
 // Reset Buttons - Load New Profile
@@ -580,6 +540,9 @@ document.getElementById('joinReset').addEventListener('click', () => {
 
 // Initialize comparison functionality (stays independent)
 initCompare();
+
+// Initialize Raw JSON tab (search, copy)
+initRawJson();
 
 // Initialize plan visualization (sets up listener for global state)
 setupPlanDropZone();

@@ -157,7 +157,6 @@ function renderSummaryCards(scans, execution) {
  */
 function renderTable(scans) {
   const thead = document.getElementById('tableHead');
-  const tbody = document.getElementById('tableBody');
 
   // Clear existing content
   thead.innerHTML = '';
