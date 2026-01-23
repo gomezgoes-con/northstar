@@ -6,12 +6,22 @@ import { parseNumericValue, sumMetric, formatNumber, formatBytes, formatTime } f
 import { findConnectorScans } from './scanParser.js';
 import { findHashJoins, combineJoinOperators, calculateJoinStats, sumOperatorTimesByPlanNodeId, extractJoinMetrics } from './joinParser.js';
 import { trackEvent } from './analytics.js';
+import { loadFromUrl, extractPasteId } from './urlLoader.js';
 
 // Store loaded comparison data
 let compareData = {
   baseline: null,
   optimized: null
 };
+
+// Store raw JSON for sharing
+let compareRawJson = {
+  baseline: null,
+  optimized: null
+};
+
+// Store source info for comparison (for reusing on share)
+let compareSource = null; // { baseline: { type, id }, optimized: { type, id } }
 
 /**
  * Setup comparison drop zones
@@ -92,6 +102,9 @@ function loadCompareFile(file, type, dropZone) {
         filename: file.name
       };
 
+      // Store raw JSON for sharing
+      compareRawJson[type] = json;
+
       // Update drop zone to show loaded state
       dropZone.classList.add('loaded');
       dropZone.innerHTML = `
@@ -107,6 +120,11 @@ function loadCompareFile(file, type, dropZone) {
       // Check if both files are loaded
       if (compareData.baseline && compareData.optimized) {
         renderComparison();
+      }
+
+      // Update share button visibility (comparison data now available)
+      if (window.updateShareButtonVisibility) {
+        window.updateShareButtonVisibility();
       }
     } catch (error) {
       console.error('Error parsing JSON:', error);
@@ -324,5 +342,353 @@ function generateCompareCardsHTML(cards) {
 export function initCompare() {
   setupCompareDropZone('compareDropBaseline', 'compareFileBaseline', 'baseline');
   setupCompareDropZone('compareDropOptimized', 'compareFileOptimized', 'optimized');
+  setupCompareUrlLoading('loadUrlBaseline', 'compareDropBaseline', 'baseline');
+  setupCompareUrlLoading('loadUrlOptimized', 'compareDropOptimized', 'optimized');
+}
+
+/**
+ * Setup URL loading for a compare drop zone
+ */
+function setupCompareUrlLoading(linkId, dropZoneId, type) {
+  const link = document.getElementById(linkId);
+  if (!link) return;
+
+  link.addEventListener('click', (e) => {
+    e.stopPropagation(); // Don't trigger drop zone file picker
+    showUrlInput(dropZoneId, type);
+  });
+}
+
+/**
+ * Show URL input in a drop zone
+ */
+function showUrlInput(dropZoneId, type) {
+  const dropZone = document.getElementById(dropZoneId);
+  if (!dropZone) return;
+
+  // Store original content
+  const originalContent = dropZone.innerHTML;
+
+  // Replace with URL input
+  dropZone.innerHTML = `
+    <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
+    <div class="url-input-inline">
+      <input type="text" id="compareUrlInput_${type}" placeholder="https://dpaste.com/... or https://gist.github.com/...">
+      <div class="url-input-actions">
+        <button class="btn-cancel-url" id="cancelUrl_${type}">Cancel</button>
+        <button class="btn-load-url" id="loadUrl_${type}">Load</button>
+      </div>
+    </div>
+  `;
+
+  // Prevent click on drop zone from triggering file picker
+  dropZone.onclick = (e) => e.stopPropagation();
+
+  // Focus the input
+  const input = document.getElementById(`compareUrlInput_${type}`);
+  input.focus();
+
+  // Handle cancel
+  document.getElementById(`cancelUrl_${type}`).addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropZone.innerHTML = originalContent;
+    dropZone.onclick = null; // Restore normal click behavior
+    // Re-setup URL link listener
+    setupCompareUrlLoading(type === 'baseline' ? 'loadUrlBaseline' : 'loadUrlOptimized', dropZoneId, type);
+  });
+
+  // Handle load
+  document.getElementById(`loadUrl_${type}`).addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const url = input.value.trim();
+    if (!url) {
+      alert('Please enter a URL');
+      return;
+    }
+    await loadCompareFromUrl(url, type, dropZone);
+  });
+
+  // Handle Enter key
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const url = input.value.trim();
+      if (url) {
+        await loadCompareFromUrl(url, type, dropZone);
+      }
+    }
+    if (e.key === 'Escape') {
+      dropZone.innerHTML = originalContent;
+      dropZone.onclick = null;
+      setupCompareUrlLoading(type === 'baseline' ? 'loadUrlBaseline' : 'loadUrlOptimized', dropZoneId, type);
+    }
+  });
+}
+
+/**
+ * Load a comparison profile from URL
+ */
+async function loadCompareFromUrl(url, type, dropZone) {
+  // Show loading state
+  dropZone.innerHTML = `
+    <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
+    <p>Loading...</p>
+  `;
+
+  try {
+    const json = await loadFromUrl(url);
+    const query = json.Query;
+
+    if (!query) {
+      throw new Error('Invalid query profile format');
+    }
+
+    // Extract source info for sharing
+    const pasteId = extractPasteId(url);
+    const sourceInfo = pasteId ? { type: 'paste', id: pasteId } : null;
+
+    // Update compareSource
+    if (sourceInfo) {
+      if (!compareSource) {
+        compareSource = {};
+      }
+      compareSource[type] = sourceInfo;
+    }
+
+    // Extract data
+    const summary = query.Summary || {};
+    const execution = query.Execution || {};
+    const scans = findConnectorScans(execution);
+
+    // Extract join data
+    const { probes, builds } = findHashJoins(execution);
+    const joins = combineJoinOperators(probes, builds);
+    const planNodeIds = new Set(joins.map(j => j.planNodeId));
+    const totalTimesByPlanNodeId = sumOperatorTimesByPlanNodeId(execution, planNodeIds);
+
+    // Build join metrics
+    const joinMetrics = joins.map(join => {
+      const totalTime = totalTimesByPlanNodeId.get(join.planNodeId) || 0;
+      return extractJoinMetrics(join, totalTime, null);
+    });
+
+    const joinStats = calculateJoinStats(joinMetrics);
+
+    compareData[type] = {
+      summary,
+      execution,
+      scans,
+      joins: joinMetrics,
+      joinStats,
+      filename: `From URL`
+    };
+
+    // Store raw JSON for sharing
+    compareRawJson[type] = json;
+
+    // Update drop zone to show loaded state
+    dropZone.classList.add('loaded');
+    dropZone.onclick = null; // Restore normal click behavior
+    dropZone.innerHTML = `
+      <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
+      <p class="loaded-info">✓ Loaded from URL</p>
+      <p>${summary['Query ID'] || 'Unknown'}</p>
+      <p>Duration: ${summary['Total'] || 'N/A'}</p>
+    `;
+
+    // Track successful URL load
+    trackEvent(`load-compare-url-${type}`);
+
+    // Check if both files are loaded
+    if (compareData.baseline && compareData.optimized) {
+      renderComparison();
+    }
+
+    // Update share button visibility
+    if (window.updateShareButtonVisibility) {
+      window.updateShareButtonVisibility();
+    }
+  } catch (error) {
+    console.error('Error loading from URL:', error);
+    alert(`Error loading from URL: ${error.message}`);
+
+    // Restore drop zone
+    const dropZoneId = type === 'baseline' ? 'compareDropBaseline' : 'compareDropOptimized';
+    dropZone.innerHTML = `
+      <h3>${type === 'baseline' ? '📊 Baseline Query' : '🚀 Optimized Query'}</h3>
+      <p>Drop the ${type === 'baseline' ? 'original' : 'optimized'} query profile</p>
+      <p class="load-url-link" id="loadUrl${type === 'baseline' ? 'Baseline' : 'Optimized'}">or Load from URL</p>
+    `;
+    dropZone.onclick = null;
+    setupCompareUrlLoading(`loadUrl${type === 'baseline' ? 'Baseline' : 'Optimized'}`, dropZoneId, type);
+  }
+}
+
+/**
+ * Check if comparison data is ready (both profiles loaded)
+ */
+export function hasCompareData() {
+  return compareData.baseline !== null && compareData.optimized !== null;
+}
+
+/**
+ * Get raw JSON for sharing
+ */
+export function getCompareRawJson() {
+  return compareRawJson;
+}
+
+/**
+ * Get comparison source info
+ */
+export function getCompareSource() {
+  return compareSource;
+}
+
+/**
+ * Set comparison source info
+ */
+export function setCompareSource(source) {
+  compareSource = source;
+}
+
+/**
+ * Load comparison from JSON objects (for URL loading)
+ * @param {Object} baselineJson - Baseline query profile JSON
+ * @param {Object} optimizedJson - Optimized query profile JSON
+ * @param {Object} source - Source info { baseline: { type, id }, optimized: { type, id } }
+ */
+export function loadCompareFromJson(baselineJson, optimizedJson, source) {
+  // Process baseline
+  processCompareJson(baselineJson, 'baseline', 'Baseline (from URL)');
+
+  // Process optimized
+  processCompareJson(optimizedJson, 'optimized', 'Optimized (from URL)');
+
+  // Store source for reuse on share
+  compareSource = source;
+
+  // Render comparison if both loaded
+  if (compareData.baseline && compareData.optimized) {
+    renderComparison();
+  }
+
+  // Update share button visibility
+  if (window.updateShareButtonVisibility) {
+    window.updateShareButtonVisibility();
+  }
+}
+
+/**
+ * Process a JSON query profile for comparison
+ */
+function processCompareJson(json, type, displayName) {
+  const query = json.Query;
+
+  if (!query) {
+    console.error(`Invalid query profile format for ${type}`);
+    return;
+  }
+
+  // Extract data
+  const summary = query.Summary || {};
+  const execution = query.Execution || {};
+  const scans = findConnectorScans(execution);
+
+  // Extract join data
+  const { probes, builds } = findHashJoins(execution);
+  const joins = combineJoinOperators(probes, builds);
+  const planNodeIds = new Set(joins.map(j => j.planNodeId));
+  const totalTimesByPlanNodeId = sumOperatorTimesByPlanNodeId(execution, planNodeIds);
+
+  // Build join metrics with total time
+  const joinMetrics = joins.map(join => {
+    const totalTime = totalTimesByPlanNodeId.get(join.planNodeId) || 0;
+    return extractJoinMetrics(join, totalTime, null);
+  });
+
+  const joinStats = calculateJoinStats(joinMetrics);
+
+  compareData[type] = {
+    summary,
+    execution,
+    scans,
+    joins: joinMetrics,
+    joinStats,
+    filename: displayName
+  };
+
+  // Store raw JSON for potential re-sharing
+  compareRawJson[type] = json;
+
+  // Update drop zone to show loaded state
+  const dropZoneId = type === 'baseline' ? 'compareDropBaseline' : 'compareDropOptimized';
+  const dropZone = document.getElementById(dropZoneId);
+  if (dropZone) {
+    dropZone.classList.add('loaded');
+    dropZone.innerHTML = `
+      <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
+      <p class="loaded-info">✓ ${displayName}</p>
+      <p>${summary['Query ID'] || 'Unknown'}</p>
+      <p>Duration: ${summary['Total'] || 'N/A'}</p>
+    `;
+  }
+}
+
+/**
+ * Reset the comparison view
+ * Called when a new query is loaded to clear optimized and show baseline
+ */
+export function resetCompare() {
+  // Clear optimized data (baseline will be set via loadCompareFromJson or processCompareJson)
+  compareData.optimized = null;
+  compareRawJson.optimized = null;
+
+  // Clear source for optimized
+  if (compareSource) {
+    compareSource.optimized = null;
+  }
+
+  // Reset optimized drop zone
+  const optimizedDropZone = document.getElementById('compareDropOptimized');
+  if (optimizedDropZone) {
+    optimizedDropZone.classList.remove('loaded');
+    optimizedDropZone.innerHTML = `
+      <h3>🚀 Optimized Query</h3>
+      <p>Drop the optimized query profile</p>
+      <p class="load-url-link" id="loadUrlOptimized">or Load from URL</p>
+    `;
+    // Re-setup URL loading link
+    setupCompareUrlLoading('loadUrlOptimized', 'compareDropOptimized', 'optimized');
+  }
+
+  // Hide comparison results
+  const results = document.getElementById('compareResults');
+  if (results) {
+    results.classList.remove('visible');
+  }
+
+  // Update share button visibility
+  if (window.updateShareButtonVisibility) {
+    window.updateShareButtonVisibility();
+  }
+}
+
+/**
+ * Set baseline from main query (called when a new query is loaded)
+ */
+export function setBaselineFromQuery(json, source) {
+  // Reset the compare view first
+  resetCompare();
+
+  // Process the query as baseline
+  processCompareJson(json, 'baseline', 'Baseline Query');
+
+  // Store source
+  if (!compareSource) compareSource = {};
+  compareSource.baseline = source;
+
+  // Store raw JSON
+  compareRawJson.baseline = json;
 }
 

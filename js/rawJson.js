@@ -5,6 +5,8 @@
 import { getQuery } from './queryState.js';
 
 // DOM Elements
+const rawDropZone = document.getElementById('rawDropZone');
+const rawContainer = document.getElementById('rawContainer');
 const rawJsonContent = document.getElementById('rawJsonContent');
 const btnCopyRaw = document.getElementById('btnCopyRaw');
 const rawSearchInput = document.getElementById('rawSearchInput');
@@ -22,6 +24,27 @@ let searchTimeout;
  * Initialize Raw JSON tab event listeners
  */
 export function initRawJson() {
+  // Drop zone click opens Load Query modal
+  rawDropZone.addEventListener('click', () => {
+    if (window.showLoadModal) window.showLoadModal();
+  });
+
+  // Drop zone drag and drop
+  rawDropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    rawDropZone.classList.add('drag-over');
+  });
+
+  rawDropZone.addEventListener('dragleave', () => {
+    rawDropZone.classList.remove('drag-over');
+  });
+
+  rawDropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    rawDropZone.classList.remove('drag-over');
+    // File handling is done by the global file input
+  });
+
   // Copy button
   btnCopyRaw.addEventListener('click', handleCopy);
 
@@ -58,6 +81,10 @@ export function updateRawTab(json) {
   rawJsonText = formatted;
   rawJsonContent.innerHTML = `<code>${escapeHtml(formatted)}</code>`;
   clearSearchState();
+
+  // Show container, hide drop zone
+  rawDropZone.style.display = 'none';
+  rawContainer.style.display = 'block';
 }
 
 /**
@@ -65,8 +92,12 @@ export function updateRawTab(json) {
  */
 export function clearRawTab() {
   rawJsonText = '';
-  rawJsonContent.innerHTML = '<code>No query loaded. Use the "Load Query" button above to load a query profile.</code>';
+  rawJsonContent.innerHTML = '<code></code>';
   clearSearchState();
+
+  // Show drop zone, hide container
+  rawDropZone.style.display = 'block';
+  rawContainer.style.display = 'none';
 }
 
 /**

@@ -360,10 +360,6 @@ export function processJoinProfile(json) {
     return extractJoinMetrics(join, totalTime, buildInputRows);
   });
 
-  console.log(`Found ${joins.length} HASH_JOIN operators`);
-  console.log('Total times by plan_node_id:', Object.fromEntries(totalTimesByPlanNodeId));
-  console.log('Join data:', joinMetrics);
-
   return { summary, execution, joins: joinMetrics };
 }
 

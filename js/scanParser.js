@@ -69,9 +69,6 @@ export function processQueryProfile(json) {
 
   // Find all CONNECTOR_SCAN operators by recursively searching
   const connectorScans = findConnectorScans(execution);
-  
-  console.log(`Found ${connectorScans.length} CONNECTOR_SCAN operators`);
-  console.log('CONNECTOR_SCAN data:', connectorScans);
 
   return { summary, execution, connectorScans };
 }

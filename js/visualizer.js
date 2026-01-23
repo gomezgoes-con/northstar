@@ -34,7 +34,7 @@ let indicatorTimeout = null;
 let currentNodePositions = {}; // For minimap rendering
 
 // DOM elements
-let planDropZone, planFileInput, planContainer, planCanvas, planReset;
+let planDropZone, planFileInput, planContainer, planCanvas;
 
 /**
  * Setup plan visualization drop zone
@@ -44,7 +44,6 @@ export function setupPlanDropZone() {
   planFileInput = document.getElementById('planFileInput');
   planContainer = document.getElementById('planContainer');
   planCanvas = document.getElementById('planCanvas');
-  planReset = document.getElementById('planReset');
 
   planDropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -62,16 +61,9 @@ export function setupPlanDropZone() {
     if (file) loadPlanFile(file);
   });
 
-  planDropZone.addEventListener('click', () => planFileInput.click());
+  planDropZone.addEventListener('click', () => window.showLoadModal && window.showLoadModal());
   planFileInput.addEventListener('change', (e) => {
     if (e.target.files[0]) loadPlanFile(e.target.files[0]);
-  });
-
-  planReset.addEventListener('click', () => {
-    cleanupViewport();
-    planDropZone.style.display = 'block';
-    planContainer.style.display = 'none';
-    planCanvas.innerHTML = '';
   });
 
   // Listen for global query state changes
