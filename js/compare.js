@@ -8,6 +8,12 @@ import { findHashJoins, combineJoinOperators, calculateJoinStats, sumOperatorTim
 import { trackEvent } from './analytics.js';
 import { loadFromUrl, extractPasteId } from './urlLoader.js';
 
+// Compare type labels configuration
+const COMPARE_LABELS = {
+  baseline: { title: '📊 Baseline', fullTitle: '📊 Baseline Query', description: 'original' },
+  optimized: { title: '🚀 Optimized', fullTitle: '🚀 Optimized Query', description: 'optimized' }
+};
+
 // Store loaded comparison data
 let compareData = {
   baseline: null,
@@ -22,6 +28,87 @@ let compareRawJson = {
 
 // Store source info for comparison (for reusing on share)
 let compareSource = null; // { baseline: { type, id }, optimized: { type, id } }
+
+/**
+ * Extract comparison data from a query profile JSON
+ * @param {Object} json - Query profile JSON
+ * @returns {Object} Extracted data { summary, execution, scans, joinMetrics, joinStats }
+ */
+function extractCompareData(json) {
+  const query = json.Query;
+  const summary = query.Summary || {};
+  const execution = query.Execution || {};
+  const scans = findConnectorScans(execution);
+
+  // Extract join data
+  const { probes, builds } = findHashJoins(execution);
+  const joins = combineJoinOperators(probes, builds);
+  const planNodeIds = new Set(joins.map(j => j.planNodeId));
+  const totalTimesByPlanNodeId = sumOperatorTimesByPlanNodeId(execution, planNodeIds);
+
+  // Build join metrics with total time
+  const joinMetrics = joins.map(join => {
+    const totalTime = totalTimesByPlanNodeId.get(join.planNodeId) || 0;
+    return extractJoinMetrics(join, totalTime, null);
+  });
+
+  const joinStats = calculateJoinStats(joinMetrics);
+
+  return { summary, execution, scans, joinMetrics, joinStats };
+}
+
+/**
+ * Render a loaded drop zone with summary info
+ * @param {HTMLElement} dropZone - The drop zone element
+ * @param {string} type - 'baseline' or 'optimized'
+ * @param {Object} summary - Query summary object
+ * @param {string} displayText - Text to show as loaded info (e.g., filename or "Loaded from URL")
+ */
+function renderLoadedDropZone(dropZone, type, summary, displayText) {
+  dropZone.classList.add('loaded');
+  dropZone.innerHTML = `
+    <h3>${COMPARE_LABELS[type].title}</h3>
+    <p class="loaded-info">✓ ${displayText}</p>
+    <p>${summary['Query ID'] || 'Unknown'}</p>
+    <p>Duration: ${summary['Total'] || 'N/A'}</p>
+  `;
+}
+
+/**
+ * Calculate change percentage and classification between baseline and optimized values
+ * @param {number} baselineNum - Baseline numeric value
+ * @param {number} optimizedNum - Optimized numeric value
+ * @param {boolean} lowerIsBetter - Whether lower values are better
+ * @returns {Object} { change, improved, changeClass, changeSymbol, changeLabel }
+ */
+function calculateChange(baselineNum, optimizedNum, lowerIsBetter) {
+  const change = baselineNum > 0 ? ((optimizedNum - baselineNum) / baselineNum) * 100 : 0;
+  const improved = lowerIsBetter ? change < 0 : change > 0;
+  const changeClass = Math.abs(change) < 1 ? 'neutral' : (improved ? 'improved' : 'regressed');
+  const changeSymbol = change > 0 ? '+' : '';
+  const changeLabel = improved ? '✓ Better' : (Math.abs(change) < 1 ? '≈ Same' : '⚠ Worse');
+
+  return { change, improved, changeClass, changeSymbol, changeLabel };
+}
+
+/**
+ * Reset a drop zone to its initial state
+ * @param {string} dropZoneId - The drop zone element ID
+ * @param {string} type - 'baseline' or 'optimized'
+ */
+function resetDropZone(dropZoneId, type) {
+  const dropZone = document.getElementById(dropZoneId);
+  if (!dropZone) return;
+
+  dropZone.classList.remove('loaded');
+  dropZone.innerHTML = `
+    <h3>${COMPARE_LABELS[type].fullTitle}</h3>
+    <p>Drop the ${COMPARE_LABELS[type].description} query profile</p>
+    <p class="load-url-link" id="loadUrl${type === 'baseline' ? 'Baseline' : 'Optimized'}">or Load from URL</p>
+  `;
+  dropZone.onclick = null;
+  setupCompareUrlLoading(`loadUrl${type === 'baseline' ? 'Baseline' : 'Optimized'}`, dropZoneId, type);
+}
 
 /**
  * Setup comparison drop zones
@@ -63,35 +150,18 @@ export function setupCompareDropZone(dropZoneId, fileInputId, type) {
  */
 function loadCompareFile(file, type, dropZone) {
   const reader = new FileReader();
-  
+
   reader.onload = (e) => {
     try {
       const json = JSON.parse(e.target.result);
-      const query = json.Query;
-      
-      if (!query) {
+
+      if (!json.Query) {
         alert('Invalid query profile format');
         return;
       }
 
-      // Extract data
-      const summary = query.Summary || {};
-      const execution = query.Execution || {};
-      const scans = findConnectorScans(execution);
-
-      // Extract join data
-      const { probes, builds } = findHashJoins(execution);
-      const joins = combineJoinOperators(probes, builds);
-      const planNodeIds = new Set(joins.map(j => j.planNodeId));
-      const totalTimesByPlanNodeId = sumOperatorTimesByPlanNodeId(execution, planNodeIds);
-
-      // Build join metrics with total time (using extractJoinMetrics for proper structure)
-      const joinMetrics = joins.map(join => {
-        const totalTime = totalTimesByPlanNodeId.get(join.planNodeId) || 0;
-        return extractJoinMetrics(join, totalTime, null);
-      });
-
-      const joinStats = calculateJoinStats(joinMetrics);
+      // Extract data using helper
+      const { summary, execution, scans, joinMetrics, joinStats } = extractCompareData(json);
 
       compareData[type] = {
         summary,
@@ -106,13 +176,7 @@ function loadCompareFile(file, type, dropZone) {
       compareRawJson[type] = json;
 
       // Update drop zone to show loaded state
-      dropZone.classList.add('loaded');
-      dropZone.innerHTML = `
-        <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
-        <p class="loaded-info">✓ ${file.name}</p>
-        <p>${summary['Query ID'] || 'Unknown'}</p>
-        <p>Duration: ${summary['Total'] || 'N/A'}</p>
-      `;
+      renderLoadedDropZone(dropZone, type, summary, file.name);
 
       // Track successful upload
       trackEvent(`upload-compare-${type}`);
@@ -256,19 +320,16 @@ function renderComparison() {
  */
 function renderCompareCards(containerId, metrics, baselineExec, optimizedExec, lowerIsBetter) {
   const container = document.getElementById(containerId);
-  
+
   container.innerHTML = metrics.map(metric => {
     const baselineVal = baselineExec[metric.key] || 'N/A';
     const optimizedVal = optimizedExec[metric.key] || 'N/A';
-    
+
     const baselineNum = parseNumericValue(baselineVal);
     const optimizedNum = parseNumericValue(optimizedVal);
-    
-    const change = baselineNum > 0 ? ((optimizedNum - baselineNum) / baselineNum) * 100 : 0;
-    const improved = lowerIsBetter ? change < 0 : change > 0;
-    const changeClass = Math.abs(change) < 1 ? 'neutral' : (improved ? 'improved' : 'regressed');
-    const changeSymbol = change > 0 ? '+' : '';
-    
+
+    const { change, changeClass, changeSymbol, changeLabel } = calculateChange(baselineNum, optimizedNum, lowerIsBetter);
+
     return `
       <div class="compare-card">
         <div class="compare-card-label">${metric.label}</div>
@@ -283,7 +344,7 @@ function renderCompareCards(containerId, metrics, baselineExec, optimizedExec, l
           </div>
           <div class="compare-change">
             <div class="compare-change-pct ${changeClass}">${changeSymbol}${change.toFixed(1)}%</div>
-            <div class="compare-change-label">${improved ? '✓ Better' : (Math.abs(change) < 1 ? '≈ Same' : '⚠ Worse')}</div>
+            <div class="compare-change-label">${changeLabel}</div>
           </div>
         </div>
       </div>
@@ -309,10 +370,7 @@ function generateCompareCardsHTML(cards) {
     const baselineDisplay = formatValue(baselineNum);
     const optimizedDisplay = formatValue(optimizedNum);
 
-    const change = baselineNum > 0 ? ((optimizedNum - baselineNum) / baselineNum) * 100 : 0;
-    const improved = card.lowerIsBetter ? change < 0 : change > 0;
-    const changeClass = Math.abs(change) < 1 ? 'neutral' : (improved ? 'improved' : 'regressed');
-    const changeSymbol = change > 0 ? '+' : '';
+    const { change, changeClass, changeSymbol, changeLabel } = calculateChange(baselineNum, optimizedNum, card.lowerIsBetter);
 
     return `
       <div class="compare-card">
@@ -328,7 +386,7 @@ function generateCompareCardsHTML(cards) {
           </div>
           <div class="compare-change">
             <div class="compare-change-pct ${changeClass}">${changeSymbol}${change.toFixed(1)}%</div>
-            <div class="compare-change-label">${improved ? '✓ Better' : (Math.abs(change) < 1 ? '≈ Same' : '⚠ Worse')}</div>
+            <div class="compare-change-label">${changeLabel}</div>
           </div>
         </div>
       </div>
@@ -368,10 +426,11 @@ function showUrlInput(dropZoneId, type) {
 
   // Store original content
   const originalContent = dropZone.innerHTML;
+  const linkId = `loadUrl${type === 'baseline' ? 'Baseline' : 'Optimized'}`;
 
   // Replace with URL input
   dropZone.innerHTML = `
-    <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
+    <h3>${COMPARE_LABELS[type].title}</h3>
     <div class="url-input-inline">
       <input type="text" id="compareUrlInput_${type}" placeholder="https://dpaste.com/... or https://gist.github.com/...">
       <div class="url-input-actions">
@@ -388,13 +447,17 @@ function showUrlInput(dropZoneId, type) {
   const input = document.getElementById(`compareUrlInput_${type}`);
   input.focus();
 
+  // Restore drop zone to original state
+  const restoreDropZone = () => {
+    dropZone.innerHTML = originalContent;
+    dropZone.onclick = null;
+    setupCompareUrlLoading(linkId, dropZoneId, type);
+  };
+
   // Handle cancel
   document.getElementById(`cancelUrl_${type}`).addEventListener('click', (e) => {
     e.stopPropagation();
-    dropZone.innerHTML = originalContent;
-    dropZone.onclick = null; // Restore normal click behavior
-    // Re-setup URL link listener
-    setupCompareUrlLoading(type === 'baseline' ? 'loadUrlBaseline' : 'loadUrlOptimized', dropZoneId, type);
+    restoreDropZone();
   });
 
   // Handle load
@@ -418,9 +481,7 @@ function showUrlInput(dropZoneId, type) {
       }
     }
     if (e.key === 'Escape') {
-      dropZone.innerHTML = originalContent;
-      dropZone.onclick = null;
-      setupCompareUrlLoading(type === 'baseline' ? 'loadUrlBaseline' : 'loadUrlOptimized', dropZoneId, type);
+      restoreDropZone();
     }
   });
 }
@@ -429,17 +490,18 @@ function showUrlInput(dropZoneId, type) {
  * Load a comparison profile from URL
  */
 async function loadCompareFromUrl(url, type, dropZone) {
+  const dropZoneId = type === 'baseline' ? 'compareDropBaseline' : 'compareDropOptimized';
+
   // Show loading state
   dropZone.innerHTML = `
-    <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
+    <h3>${COMPARE_LABELS[type].title}</h3>
     <p>Loading...</p>
   `;
 
   try {
     const json = await loadFromUrl(url);
-    const query = json.Query;
 
-    if (!query) {
+    if (!json.Query) {
       throw new Error('Invalid query profile format');
     }
 
@@ -455,24 +517,8 @@ async function loadCompareFromUrl(url, type, dropZone) {
       compareSource[type] = sourceInfo;
     }
 
-    // Extract data
-    const summary = query.Summary || {};
-    const execution = query.Execution || {};
-    const scans = findConnectorScans(execution);
-
-    // Extract join data
-    const { probes, builds } = findHashJoins(execution);
-    const joins = combineJoinOperators(probes, builds);
-    const planNodeIds = new Set(joins.map(j => j.planNodeId));
-    const totalTimesByPlanNodeId = sumOperatorTimesByPlanNodeId(execution, planNodeIds);
-
-    // Build join metrics
-    const joinMetrics = joins.map(join => {
-      const totalTime = totalTimesByPlanNodeId.get(join.planNodeId) || 0;
-      return extractJoinMetrics(join, totalTime, null);
-    });
-
-    const joinStats = calculateJoinStats(joinMetrics);
+    // Extract data using helper
+    const { summary, execution, scans, joinMetrics, joinStats } = extractCompareData(json);
 
     compareData[type] = {
       summary,
@@ -480,21 +526,15 @@ async function loadCompareFromUrl(url, type, dropZone) {
       scans,
       joins: joinMetrics,
       joinStats,
-      filename: `From URL`
+      filename: 'From URL'
     };
 
     // Store raw JSON for sharing
     compareRawJson[type] = json;
 
     // Update drop zone to show loaded state
-    dropZone.classList.add('loaded');
     dropZone.onclick = null; // Restore normal click behavior
-    dropZone.innerHTML = `
-      <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
-      <p class="loaded-info">✓ Loaded from URL</p>
-      <p>${summary['Query ID'] || 'Unknown'}</p>
-      <p>Duration: ${summary['Total'] || 'N/A'}</p>
-    `;
+    renderLoadedDropZone(dropZone, type, summary, 'Loaded from URL');
 
     // Track successful URL load
     trackEvent(`load-compare-url-${type}`);
@@ -513,14 +553,7 @@ async function loadCompareFromUrl(url, type, dropZone) {
     alert(`Error loading from URL: ${error.message}`);
 
     // Restore drop zone
-    const dropZoneId = type === 'baseline' ? 'compareDropBaseline' : 'compareDropOptimized';
-    dropZone.innerHTML = `
-      <h3>${type === 'baseline' ? '📊 Baseline Query' : '🚀 Optimized Query'}</h3>
-      <p>Drop the ${type === 'baseline' ? 'original' : 'optimized'} query profile</p>
-      <p class="load-url-link" id="loadUrl${type === 'baseline' ? 'Baseline' : 'Optimized'}">or Load from URL</p>
-    `;
-    dropZone.onclick = null;
-    setupCompareUrlLoading(`loadUrl${type === 'baseline' ? 'Baseline' : 'Optimized'}`, dropZoneId, type);
+    resetDropZone(dropZoneId, type);
   }
 }
 
@@ -583,31 +616,13 @@ export function loadCompareFromJson(baselineJson, optimizedJson, source) {
  * Process a JSON query profile for comparison
  */
 function processCompareJson(json, type, displayName) {
-  const query = json.Query;
-
-  if (!query) {
+  if (!json.Query) {
     console.error(`Invalid query profile format for ${type}`);
     return;
   }
 
-  // Extract data
-  const summary = query.Summary || {};
-  const execution = query.Execution || {};
-  const scans = findConnectorScans(execution);
-
-  // Extract join data
-  const { probes, builds } = findHashJoins(execution);
-  const joins = combineJoinOperators(probes, builds);
-  const planNodeIds = new Set(joins.map(j => j.planNodeId));
-  const totalTimesByPlanNodeId = sumOperatorTimesByPlanNodeId(execution, planNodeIds);
-
-  // Build join metrics with total time
-  const joinMetrics = joins.map(join => {
-    const totalTime = totalTimesByPlanNodeId.get(join.planNodeId) || 0;
-    return extractJoinMetrics(join, totalTime, null);
-  });
-
-  const joinStats = calculateJoinStats(joinMetrics);
+  // Extract data using helper
+  const { summary, execution, scans, joinMetrics, joinStats } = extractCompareData(json);
 
   compareData[type] = {
     summary,
@@ -625,13 +640,7 @@ function processCompareJson(json, type, displayName) {
   const dropZoneId = type === 'baseline' ? 'compareDropBaseline' : 'compareDropOptimized';
   const dropZone = document.getElementById(dropZoneId);
   if (dropZone) {
-    dropZone.classList.add('loaded');
-    dropZone.innerHTML = `
-      <h3>${type === 'baseline' ? '📊 Baseline' : '🚀 Optimized'}</h3>
-      <p class="loaded-info">✓ ${displayName}</p>
-      <p>${summary['Query ID'] || 'Unknown'}</p>
-      <p>Duration: ${summary['Total'] || 'N/A'}</p>
-    `;
+    renderLoadedDropZone(dropZone, type, summary, displayName);
   }
 }
 
@@ -650,17 +659,7 @@ export function resetCompare() {
   }
 
   // Reset optimized drop zone
-  const optimizedDropZone = document.getElementById('compareDropOptimized');
-  if (optimizedDropZone) {
-    optimizedDropZone.classList.remove('loaded');
-    optimizedDropZone.innerHTML = `
-      <h3>🚀 Optimized Query</h3>
-      <p>Drop the optimized query profile</p>
-      <p class="load-url-link" id="loadUrlOptimized">or Load from URL</p>
-    `;
-    // Re-setup URL loading link
-    setupCompareUrlLoading('loadUrlOptimized', 'compareDropOptimized', 'optimized');
-  }
+  resetDropZone('compareDropOptimized', 'optimized');
 
   // Hide comparison results
   const results = document.getElementById('compareResults');

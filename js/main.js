@@ -294,26 +294,23 @@ function closeLoadModal() {
   document.querySelector('.load-options').style.display = 'grid';
 }
 
-closeModal.addEventListener('click', closeLoadModal);
-modalBackdrop.addEventListener('click', () => {
-  // Close whichever modal is open
+// Close any open modal
+function closeAnyOpenModal() {
   if (loadModal.style.display === 'block') {
     closeLoadModal();
   }
   if (shareModal.style.display === 'block') {
     closeShareModalFn();
   }
-});
+}
+
+closeModal.addEventListener('click', closeLoadModal);
+modalBackdrop.addEventListener('click', closeAnyOpenModal);
 
 // Close modals with Escape key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (loadModal.style.display === 'block') {
-      closeLoadModal();
-    }
-    if (shareModal.style.display === 'block') {
-      closeShareModalFn();
-    }
+    closeAnyOpenModal();
   }
 });
 
