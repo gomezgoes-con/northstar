@@ -29,8 +29,10 @@
        ======================================== -->
   <header>
     <div class="header-left">
-      <img src="northstar_dark.png" alt="NorthStar Logo" class="logo-img">
-      <div class="logo">NorthStar</div>
+      <a href="./" class="logo-link" id="logoLink">
+        <img src="northstar_dark.png" alt="NorthStar Logo" class="logo-img">
+        <div class="logo">NorthStar</div>
+      </a>
       <h1>Query Analyzer for StarRocks</h1>
     </div>
     <div class="header-right">
@@ -93,6 +95,15 @@
 
   <div class="modal-backdrop" id="modalBackdrop" style="display: none;"></div>
 
+  <!-- Loading overlay for URL loading -->
+  <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+    <div class="loading-content">
+      <img src="northstar_dark.png" alt="Loading..." class="loading-logo loading-logo-dark">
+      <img src="northstar_light.png" alt="Loading..." class="loading-logo loading-logo-light">
+      <p id="loadingMessage">Loading query...</p>
+    </div>
+  </div>
+
   <!-- ========================================
        Tab Navigation
        ======================================== -->
@@ -112,11 +123,11 @@
     <div class="tab-panel active" id="tab-scan">
       <!-- Drop Zone: Visible initially for file upload -->
       <div class="drop-zone" id="dropZone">
-      <div class="drop-zone-icon">📁</div>
-      <h2>Drop your query profile JSON here</h2>
-      <p>or click to browse files</p>
-      <input type="file" id="fileInput" accept=".json">
-    </div>
+        <div class="drop-zone-icon">📁</div>
+        <h2>Drop your query profile JSON here</h2>
+        <p>or click to load query</p>
+        <input type="file" id="fileInput" accept=".json">
+      </div>
 
     <!-- Dashboard: Hidden until a file is loaded -->
     <div class="dashboard" id="dashboard">
@@ -125,7 +136,6 @@
       <section class="query-info">
         <div class="query-info-header">
           <h2>Query Information</h2>
-          <button class="btn-reset" id="scanReset">Load Different Profile</button>
         </div>
         <div class="query-meta" id="queryMeta">
           <!-- Populated by JavaScript -->
@@ -179,9 +189,9 @@
     <div class="tab-panel" id="tab-join">
       <!-- Drop Zone: Visible initially for file upload -->
       <div class="drop-zone" id="joinDropZone">
-        <div class="drop-zone-icon">🔗</div>
+        <div class="drop-zone-icon">📁</div>
         <h2>Drop your query profile JSON here</h2>
-        <p>or click to browse files</p>
+        <p>or click to load query</p>
         <input type="file" id="joinFileInput" accept=".json">
       </div>
 
@@ -192,7 +202,6 @@
         <section class="query-info">
           <div class="query-info-header">
             <h2>Query Information</h2>
-            <button class="btn-reset" id="joinReset">Load Different Profile</button>
           </div>
           <div class="query-meta" id="joinQueryMeta">
             <!-- Populated by JavaScript -->
@@ -242,11 +251,13 @@
         <div class="compare-drop baseline" id="compareDropBaseline">
           <h3>📊 Baseline Query</h3>
           <p>Drop the original query profile</p>
+          <p class="load-url-link" id="loadUrlBaseline">or Load from URL</p>
           <input type="file" id="compareFileBaseline" accept=".json">
         </div>
         <div class="compare-drop optimized" id="compareDropOptimized">
           <h3>🚀 Optimized Query</h3>
           <p>Drop the optimized query profile</p>
+          <p class="load-url-link" id="loadUrlOptimized">or Load from URL</p>
           <input type="file" id="compareFileOptimized" accept=".json">
         </div>
       </div>
@@ -295,9 +306,9 @@
     <div class="tab-panel" id="tab-plan">
       <!-- Drop Zone for Plan -->
       <div class="drop-zone" id="planDropZone">
-        <div class="drop-zone-icon">🗺️</div>
-        <h3>Drop Query Profile JSON</h3>
-        <p>Drag & drop a profile to visualize the execution plan</p>
+        <div class="drop-zone-icon">📁</div>
+        <h2>Drop your query profile JSON here</h2>
+        <p>or click to load query</p>
         <input type="file" id="planFileInput" accept=".json">
       </div>
 
@@ -305,7 +316,6 @@
       <div class="plan-container" id="planContainer" style="display: none;">
         <div class="plan-header">
           <h3>Execution Plan</h3>
-          <button class="btn-reset" id="planReset">Load Different Profile</button>
         </div>
         <div class="plan-canvas" id="planCanvas">
           <!-- zoom-container will be injected by JS with graph content -->
@@ -340,7 +350,16 @@
 
     <!-- ====== RAW JSON TAB ====== -->
     <div class="tab-panel" id="tab-raw">
-      <div class="raw-container" id="rawContainer">
+      <!-- Drop Zone for Raw JSON -->
+      <div class="drop-zone" id="rawDropZone">
+        <div class="drop-zone-icon">📁</div>
+        <h2>Drop your query profile JSON here</h2>
+        <p>or click to load query</p>
+        <input type="file" id="rawFileInput" accept=".json">
+      </div>
+
+      <!-- Raw JSON Container (hidden until file loaded) -->
+      <div class="raw-container" id="rawContainer" style="display: none;">
         <div class="raw-header">
           <h2>Raw Query JSON</h2>
           <div class="raw-header-actions">
@@ -354,7 +373,7 @@
           </div>
         </div>
         <div class="raw-content">
-          <pre id="rawJsonContent"><code>No query loaded. Use the "Load Query" button above to load a query profile.</code></pre>
+          <pre id="rawJsonContent"><code></code></pre>
         </div>
       </div>
     </div>

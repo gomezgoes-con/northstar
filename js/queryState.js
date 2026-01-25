@@ -19,30 +19,88 @@ let querySource = null; // { type: 'gist|paste', id: '...', url: '...' }
 // Listeners for state changes
 const listeners = [];
 
+// Loading overlay helpers
+function showLoading(message) {
+  const overlay = document.getElementById('loadingOverlay');
+  const messageEl = document.getElementById('loadingMessage');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    if (messageEl) messageEl.textContent = message;
+  }
+}
+
+function hideLoading() {
+  const overlay = document.getElementById('loadingOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
 /**
  * Initialize query state from URL only
- * Checks for #gist:ID or #paste:ID format
- * Returns { loaded: boolean, tab: string|null } with optional tab to switch to
+ * Checks for ?query=... and ?optimised=... format
+ * Returns { loaded: boolean, tab: string|null, isCompare: boolean, compareData?: {...} }
  */
 export async function initQueryState() {
   const hash = window.location.hash;
-  if (!hash) return { loaded: false, tab: null };
+  const hasQueryParams = window.location.search.includes('query=');
+
+  if (!hash && !hasQueryParams) return { loaded: false, tab: null, isCompare: false };
 
   try {
     const parsed = parseNorthStarUrl(hash);
     if (parsed) {
+      // Handle comparison URL
+      if (parsed.type === 'compare') {
+        showLoading('Loading baseline query...');
+        const baselineJson = await loadFromUrl(parsed.baseline.url);
+
+        // Delay for dpaste rate limit (1 req/sec)
+        if (parsed.baseline.url.includes('dpaste.com') && parsed.optimized.url.includes('dpaste.com')) {
+          showLoading('Loading optimised query...');
+          await new Promise(r => setTimeout(r, 1100));
+        } else {
+          showLoading('Loading optimised query...');
+        }
+
+        const optimizedJson = await loadFromUrl(parsed.optimized.url);
+        hideLoading();
+
+        // Also set baseline as the main query so other tabs can use it
+        currentQuery = baselineJson;
+        querySource = parsed.baseline;
+        notifyListeners();
+
+        return {
+          loaded: true,
+          tab: parsed.tab || 'compare',
+          isCompare: true,
+          compareData: {
+            baselineJson,
+            optimizedJson,
+            source: {
+              baseline: { type: parsed.baseline.type, id: parsed.baseline.id },
+              optimized: { type: parsed.optimized.type, id: parsed.optimized.id }
+            }
+          }
+        };
+      }
+
       // Load from external URL (gist or paste)
+      showLoading('Loading query...');
       const query = await loadFromUrl(parsed.url);
+      hideLoading();
+
       currentQuery = query;
       querySource = parsed; // Store source for reuse
       notifyListeners();
-      return { loaded: true, tab: parsed.tab };
+      return { loaded: true, tab: parsed.tab, isCompare: false };
     }
   } catch (error) {
+    hideLoading();
     console.error('Failed to load query from URL:', error);
+    throw error; // Re-throw so caller can show user-visible error
   }
 
-  return { loaded: false, tab: null };
+  return { loaded: false, tab: null, isCompare: false };
 }
 
 /**

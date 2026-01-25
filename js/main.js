@@ -5,13 +5,13 @@
 
 import { processQueryProfile } from './scanParser.js';
 import { renderDashboard } from './scanRender.js';
-import { initCompare } from './compare.js';
+import { initCompare, hasCompareData, getCompareRawJson, getCompareSource, setCompareSource, loadCompareFromJson, setBaselineFromQuery } from './compare.js';
 import { setupPlanDropZone, refreshPlanView, zoomToNode } from './visualizer.js';
 import { processJoinProfile } from './joinParser.js';
 import { renderJoinDashboard } from './joinRender.js';
 import { trackEvent } from './analytics.js';
-import { initQueryState, getQuery, setQuery, addListener, hasQuery, getShareableUrl, getQuerySource } from './queryState.js';
-import { loadFromUrl, shareToDpaste, parseNorthStarUrl, extractGistId, extractPasteId } from './urlLoader.js';
+import { initQueryState, getQuery, setQuery, clearQuery, addListener, hasQuery, getShareableUrl, getQuerySource } from './queryState.js';
+import { loadFromUrl, shareToDpaste, parseNorthStarUrl, extractGistId, extractPasteId, buildQueryUrl, buildCompareUrl } from './urlLoader.js';
 import { initRawJson, updateRawTab, clearRawTab, searchFor } from './rawJson.js';
 import { initTheme } from './theme.js';
 
@@ -58,9 +58,9 @@ dropZone.addEventListener('drop', (e) => {
   }
 });
 
-// Click on drop zone opens file picker
+// Click on drop zone opens Load Query modal
 dropZone.addEventListener('click', () => {
-  fileInput.click();
+  showLoadModal();
 });
 
 // When user selects a file via the file picker
@@ -121,6 +121,22 @@ function getCurrentTab() {
 }
 
 /**
+ * Update share button visibility based on current context
+ * Shows button if: on compare tab with data, or on other tabs with query loaded
+ */
+function updateShareButtonVisibility() {
+  const currentTab = getCurrentTab();
+
+  if (currentTab === 'compare') {
+    // On compare tab, show button if comparison data is loaded
+    globalShareBtn.style.display = hasCompareData() ? 'block' : 'none';
+  } else {
+    // On other tabs, show button if query is loaded
+    globalShareBtn.style.display = hasQuery() ? 'block' : 'none';
+  }
+}
+
+/**
  * Switch to a specific tab by ID
  * Valid tabs: scan, join, plan, raw, compare
  */
@@ -140,6 +156,9 @@ function switchToTab(tabId) {
   if (tabId === 'plan') {
     refreshPlanView();
   }
+
+  // Update share button visibility based on tab context
+  updateShareButtonVisibility();
 
   // Track tab switch
   trackEvent(`tab-${tabId}`);
@@ -173,9 +192,9 @@ joinDropZone.addEventListener('drop', (e) => {
   }
 });
 
-// Click on join drop zone opens file picker
+// Click on join drop zone opens Load Query modal
 joinDropZone.addEventListener('click', () => {
-  joinFileInput.click();
+  showLoadModal();
 });
 
 // When user selects a file via the join file picker
@@ -244,10 +263,26 @@ const btnCancelShare = document.getElementById('btnCancelShare');
 const btnConfirmShare = document.getElementById('btnConfirmShare');
 
 // Set up global load button - opens modal
-globalLoadBtn.addEventListener('click', () => {
+globalLoadBtn.addEventListener('click', showLoadModal);
+
+// Set up logo link - clears state and goes to home
+document.getElementById('logoLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  clearQuery();
+  // Navigate to clean URL (removes query params)
+  window.history.replaceState(null, '', window.location.pathname);
+  // Switch to default tab
+  switchToTab('scan');
+});
+
+// Expose showLoadModal globally for other modules
+window.showLoadModal = showLoadModal;
+
+// Show the Load Query modal
+function showLoadModal() {
   loadModal.style.display = 'block';
   modalBackdrop.style.display = 'block';
-});
+}
 
 // Close modal and reset to initial state
 function closeLoadModal() {
@@ -259,14 +294,23 @@ function closeLoadModal() {
   document.querySelector('.load-options').style.display = 'grid';
 }
 
-closeModal.addEventListener('click', closeLoadModal);
-modalBackdrop.addEventListener('click', () => {
-  // Close whichever modal is open
+// Close any open modal
+function closeAnyOpenModal() {
   if (loadModal.style.display === 'block') {
     closeLoadModal();
   }
   if (shareModal.style.display === 'block') {
     closeShareModalFn();
+  }
+}
+
+closeModal.addEventListener('click', closeLoadModal);
+modalBackdrop.addEventListener('click', closeAnyOpenModal);
+
+// Close modals with Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeAnyOpenModal();
   }
 });
 
@@ -339,6 +383,43 @@ globalFileInput.addEventListener('change', (e) => {
 
 // Set up global share button - reuses source or creates dpaste
 globalShareBtn.addEventListener('click', async () => {
+  const currentTab = getCurrentTab();
+  const originalText = globalShareBtn.textContent;
+
+  // Handle comparison tab sharing
+  if (currentTab === 'compare') {
+    if (!hasCompareData()) {
+      alert('Load both baseline and optimized profiles to share a comparison');
+      return;
+    }
+
+    const compareSource = getCompareSource();
+
+    // If comparison was loaded from URL, reuse those IDs
+    if (compareSource && compareSource.baseline && compareSource.optimized) {
+      const shareUrl = `${window.location.origin}${window.location.pathname}#compare:${compareSource.baseline.id}..${compareSource.optimized.id}`;
+
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        globalShareBtn.textContent = '✓ Link copied!';
+        setTimeout(() => {
+          globalShareBtn.textContent = originalText;
+        }, 2000);
+        trackEvent('share-compare-reuse');
+      } catch (error) {
+        console.error('Failed to copy URL:', error);
+        alert('Failed to copy URL to clipboard');
+      }
+      return;
+    }
+
+    // Show confirmation modal for creating new dpaste
+    shareModal.style.display = 'block';
+    modalBackdrop.style.display = 'block';
+    return;
+  }
+
+  // Handle regular query sharing
   const query = getQuery();
   if (!query) {
     alert('No query loaded to share');
@@ -346,11 +427,9 @@ globalShareBtn.addEventListener('click', async () => {
   }
 
   const source = getQuerySource();
-  const originalText = globalShareBtn.textContent;
 
   // If query was loaded from gist/paste, reuse that URL
   if (source && (source.type === 'gist' || source.type === 'paste')) {
-    const currentTab = getCurrentTab();
     const shareUrl = `${window.location.origin}${window.location.pathname}#${source.type}:${source.id}&tab=${currentTab}`;
 
     try {
@@ -381,9 +460,9 @@ function closeShareModalFn() {
 closeShareModal.addEventListener('click', closeShareModalFn);
 btnCancelShare.addEventListener('click', closeShareModalFn);
 
-// Confirm share - create dpaste
+// Confirm share - create dpaste (handles both single query and comparison)
 btnConfirmShare.addEventListener('click', async () => {
-  const query = getQuery();
+  const currentTab = getCurrentTab();
   const originalText = globalShareBtn.textContent;
 
   try {
@@ -392,15 +471,50 @@ btnConfirmShare.addEventListener('click', async () => {
     globalShareBtn.textContent = '⏳ Creating share link...';
     globalShareBtn.disabled = true;
 
-    // Create paste on dpaste.com
-    const pasteUrl = await shareToDpaste(query);
+    let shareUrl;
 
-    // Extract paste ID from URL
-    const pasteId = pasteUrl.replace('https://dpaste.com/', '').replace('.txt', '');
+    // Handle comparison sharing
+    if (currentTab === 'compare' && hasCompareData()) {
+      const rawJson = getCompareRawJson();
 
-    // Generate NorthStar URL with current tab
-    const currentTab = getCurrentTab();
-    const shareUrl = `${window.location.origin}${window.location.pathname}#paste:${pasteId}&tab=${currentTab}`;
+      // Create both pastes in parallel
+      const [baselinePasteUrl, optimizedPasteUrl] = await Promise.all([
+        shareToDpaste(rawJson.baseline),
+        shareToDpaste(rawJson.optimized)
+      ]);
+
+      // Extract paste IDs
+      const baselineId = baselinePasteUrl.replace('https://dpaste.com/', '').replace('.txt', '');
+      const optimizedId = optimizedPasteUrl.replace('https://dpaste.com/', '').replace('.txt', '');
+
+      // Store source for potential reuse
+      const baselineSource = { type: 'paste', id: baselineId };
+      const optimisedSource = { type: 'paste', id: optimizedId };
+      setCompareSource({
+        baseline: baselineSource,
+        optimized: optimisedSource
+      });
+
+      // Generate comparison URL using new query param format
+      shareUrl = buildCompareUrl(baselineSource, optimisedSource);
+
+      trackEvent('share-compare-dpaste');
+    } else {
+      // Handle single query sharing
+      const query = getQuery();
+
+      // Create paste on dpaste.com
+      const pasteUrl = await shareToDpaste(query);
+
+      // Extract paste ID from URL
+      const pasteId = pasteUrl.replace('https://dpaste.com/', '').replace('.txt', '');
+
+      // Generate NorthStar URL with current tab using new query param format
+      const source = { type: 'paste', id: pasteId };
+      shareUrl = `${buildQueryUrl(source)}#${currentTab}`;
+
+      trackEvent('share-dpaste');
+    }
 
     // Copy to clipboard
     await navigator.clipboard.writeText(shareUrl);
@@ -412,8 +526,6 @@ btnConfirmShare.addEventListener('click', async () => {
       globalShareBtn.textContent = originalText;
       globalShareBtn.disabled = false;
     }, 2000);
-
-    trackEvent('share-dpaste');
 
   } catch (error) {
     console.error('Failed to create share link:', error);
@@ -458,18 +570,15 @@ function loadGlobalFile(file) {
 // Listen for query state changes to update UI
 addListener((query) => {
   if (query) {
-    // Show share button when query is loaded
-    globalShareBtn.style.display = 'block';
-
     // Update all tabs with the new query
     updateAllTabsWithQuery(query);
   } else {
-    // Hide share button when no query
-    globalShareBtn.style.display = 'none';
-
     // Clear all tabs
     clearAllTabs();
   }
+
+  // Update share button visibility based on current context
+  updateShareButtonVisibility();
 });
 
 // Update all tabs when query changes
@@ -497,7 +606,14 @@ function updateAllTabsWithQuery(json) {
     console.error('Error updating Raw JSON tab:', error);
   }
 
-  // Note: Compare tab remains independent (needs two queries)
+  // Update Compare tab - set as baseline, clear optimized
+  try {
+    const source = getQuerySource();
+    setBaselineFromQuery(json, source);
+  } catch (error) {
+    console.error('Error updating Compare tab:', error);
+  }
+
   // Note: Plan tab updated via its own listener in visualizer.js
 }
 
@@ -518,24 +634,6 @@ function clearAllTabs() {
 }
 
 // ========================================
-// Reset Buttons - Load New Profile
-// ========================================
-
-// Scan Summary reset button
-document.getElementById('scanReset').addEventListener('click', () => {
-  dropZone.classList.remove('hidden');
-  dashboard.classList.remove('visible');
-  fileInput.value = ''; // Clear file input so same file can be re-selected
-});
-
-// Join Summary reset button
-document.getElementById('joinReset').addEventListener('click', () => {
-  joinDropZone.classList.remove('hidden');
-  joinDashboard.classList.remove('visible');
-  joinFileInput.value = ''; // Clear file input so same file can be re-selected
-});
-
-// ========================================
 // Initialize
 // ========================================
 
@@ -551,22 +649,38 @@ initRawJson();
 // Initialize plan visualization (sets up listener for global state)
 setupPlanDropZone();
 
-/// Initialize query state from URL (#gist:ID or #paste:ID)
+/// Initialize query state from URL (#gist:ID, #paste:ID, or #compare:ID1..ID2)
 // This MUST be called AFTER all listeners are set up so they receive the initial state
 // It's async now because it loads from external URLs
-initQueryState().then(({ loaded, tab }) => {
+initQueryState().then(({ loaded, tab, isCompare, compareData }) => {
+  // Handle comparison URL
+  if (isCompare && compareData) {
+    loadCompareFromJson(
+      compareData.baselineJson,
+      compareData.optimizedJson,
+      compareData.source
+    );
+    trackEvent('load-compare-url');
+  }
+
   // Switch to the tab specified in URL (if any)
   if (loaded && tab) {
     switchToTab(tab);
   }
 }).catch(err => {
   console.error('Failed to initialize query state:', err);
+  alert(`Failed to load shared link: ${err.message}`);
 });
 
 // ========================================
 // Global Navigation Functions
-// Exposed for use by other modules (e.g., scanRender.js popup)
+// Exposed for use by other modules (e.g., scanRender.js popup, compare.js)
 // ========================================
+
+/**
+ * Update share button visibility (called when comparison data changes)
+ */
+window.updateShareButtonVisibility = updateShareButtonVisibility;
 
 /**
  * Navigate to a specific node in the Query Plan tab

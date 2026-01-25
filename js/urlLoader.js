@@ -125,46 +125,84 @@ export async function shareToDpaste(queryJson) {
 }
 
 /**
- * Parse a NorthStar URL and extract the external URL reference
- * Format: http://localhost:8000/#gist:ID or #paste:ID
- * Optional tab parameter: #gist:ID&tab=plan or #paste:ID&tab=join
+ * Parse a source reference (paste:ID or gist:ID) and return URL info
  */
-export function parseNorthStarUrl(hash) {
-  if (!hash) return null;
+function parseSourceRef(ref) {
+  if (!ref) return null;
 
-  // Remove leading #
-  hash = hash.replace(/^#/, '');
-
-  // Extract tab parameter if present (e.g., &tab=plan)
-  let tab = null;
-  const tabMatch = hash.match(/&tab=([a-z]+)/);
-  if (tabMatch) {
-    tab = tabMatch[1];
-    hash = hash.replace(/&tab=[a-z]+/, ''); // Remove tab from hash for ID extraction
+  if (ref.startsWith('gist:')) {
+    const id = ref.substring(5);
+    return { type: 'gist', id, url: `https://api.github.com/gists/${id}` };
   }
 
-  // Check for gist: or paste: prefix
-  if (hash.startsWith('gist:')) {
-    const gistId = hash.substring(5);
-    return {
-      type: 'gist',
-      id: gistId,
-      url: `https://api.github.com/gists/${gistId}`, // Use API URL
-      tab
-    };
-  }
-
-  if (hash.startsWith('paste:')) {
-    const pasteId = hash.substring(6);
-    return {
-      type: 'paste',
-      id: pasteId,
-      url: `https://dpaste.com/${pasteId}`,
-      tab
-    };
+  if (ref.startsWith('paste:')) {
+    const id = ref.substring(6);
+    return { type: 'paste', id, url: `https://dpaste.com/${id}` };
   }
 
   return null;
+}
+
+/**
+ * Parse a NorthStar URL and extract the external URL reference
+ *
+ * URL format (query params + hash for tab):
+ *   Single query: ?query=paste:ID#scan or ?query=gist:ID#plan
+ *   Comparison:   ?query=paste:ID&optimised=gist:ID#compare
+ *
+ * Source format: {type}:{id} where type is 'paste' (dpaste.com) or 'gist' (GitHub)
+ * Note: 'query' serves as both single query AND baseline for comparisons
+ */
+export function parseNorthStarUrl(hash) {
+  const urlParams = new URLSearchParams(window.location.search);
+  const hashTab = window.location.hash.replace(/^#/, '');
+
+  const queryRef = urlParams.get('query');
+  const optimisedRef = urlParams.get('optimised');
+
+  // Check for comparison: ?query=paste:ID&optimised=gist:ID
+  if (queryRef && optimisedRef) {
+    const baseline = parseSourceRef(queryRef);
+    const optimised = parseSourceRef(optimisedRef);
+
+    if (baseline && optimised) {
+      return {
+        type: 'compare',
+        baseline,
+        optimized: optimised,
+        tab: hashTab || 'compare'
+      };
+    }
+  }
+
+  // Single query: ?query=paste:ID or ?query=gist:ID
+  if (queryRef) {
+    const source = parseSourceRef(queryRef);
+    if (source) {
+      return {
+        ...source,
+        tab: hashTab || null
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Build a shareable URL for a single query
+ */
+export function buildQueryUrl(source) {
+  const base = `${window.location.origin}${window.location.pathname}`;
+  return `${base}?query=${source.type}:${source.id}`;
+}
+
+/**
+ * Build a shareable URL for a comparison
+ */
+export function buildCompareUrl(baselineSource, optimisedSource) {
+  const base = `${window.location.origin}${window.location.pathname}`;
+  return `${base}?query=${baselineSource.type}:${baselineSource.id}&optimised=${optimisedSource.type}:${optimisedSource.id}#compare`;
 }
 
 /**
