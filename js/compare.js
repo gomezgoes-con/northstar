@@ -674,6 +674,34 @@ export function resetCompare() {
 }
 
 /**
+ * Clear the entire comparison view (both baseline and optimized)
+ * Called when clearing all data (e.g., logo click reset)
+ */
+export function clearCompare() {
+  // Clear all data
+  compareData.baseline = null;
+  compareData.optimized = null;
+  compareRawJson.baseline = null;
+  compareRawJson.optimized = null;
+  compareSource = null;
+
+  // Reset both drop zones
+  resetDropZone('compareDropBaseline', 'baseline');
+  resetDropZone('compareDropOptimized', 'optimized');
+
+  // Hide comparison results
+  const results = document.getElementById('compareResults');
+  if (results) {
+    results.classList.remove('visible');
+  }
+
+  // Update share button visibility
+  if (window.updateShareButtonVisibility) {
+    window.updateShareButtonVisibility();
+  }
+}
+
+/**
  * Set baseline from main query (called when a new query is loaded)
  */
 export function setBaselineFromQuery(json, source) {

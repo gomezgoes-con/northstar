@@ -5,7 +5,7 @@
 
 import { processQueryProfile } from './scanParser.js';
 import { renderDashboard } from './scanRender.js';
-import { initCompare, hasCompareData, getCompareRawJson, getCompareSource, setCompareSource, loadCompareFromJson, setBaselineFromQuery } from './compare.js';
+import { initCompare, hasCompareData, getCompareRawJson, getCompareSource, setCompareSource, loadCompareFromJson, setBaselineFromQuery, clearCompare } from './compare.js';
 import { setupPlanDropZone, refreshPlanView, zoomToNode } from './visualizer.js';
 import { processJoinProfile } from './joinParser.js';
 import { renderJoinDashboard } from './joinRender.js';
@@ -619,16 +619,19 @@ function updateAllTabsWithQuery(json) {
 
 // Clear all tabs
 function clearAllTabs() {
-  // Reset Scan Summary
-  dropZone.style.display = 'block';
+  // Reset Scan Summary - use classList to match how renderDashboard hides it
+  dropZone.classList.remove('hidden');
   dashboard.classList.remove('visible');
 
-  // Reset Join Summary
-  joinDropZone.style.display = 'block';
+  // Reset Join Summary - use classList to match how renderJoinDashboard hides it
+  joinDropZone.classList.remove('hidden');
   joinDashboard.classList.remove('visible');
 
   // Reset Raw JSON tab
   clearRawTab();
+
+  // Reset Compare tab
+  clearCompare();
 
   // Plan tab cleared via its own listener in visualizer.js
 }
