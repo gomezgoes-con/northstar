@@ -625,6 +625,59 @@ tr.group-header-row th.build-header {
   border-bottom: 2px solid var(--orange);
 }
 
+/* ========================================
+   Scan Table Group Headers (color-coded)
+   ======================================== */
+
+/* Output - cyan/accent */
+tr.group-header-row th.output-header {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Operator Time - green/success */
+tr.group-header-row th.operator-time-header {
+  background: rgba(163, 190, 140, 0.15);
+  color: var(--success);
+  border-bottom: 2px solid var(--success);
+}
+
+/* Scan Time - green/success (same as Operator Time) */
+tr.group-header-row th.scan-time-header {
+  background: rgba(163, 190, 140, 0.15);
+  color: var(--success);
+  border-bottom: 2px solid var(--success);
+}
+
+/* Index Filters - orange/warning */
+tr.group-header-row th.index-filters-header {
+  background: rgba(235, 203, 139, 0.15);
+  color: var(--warning);
+  border-bottom: 2px solid var(--warning);
+}
+
+/* Predicate Filters - orange/warning (same family as Index) */
+tr.group-header-row th.pred-filters-header {
+  background: rgba(208, 135, 112, 0.15);
+  color: var(--orange);
+  border-bottom: 2px solid var(--orange);
+}
+
+/* Runtime Filters - blue/info */
+tr.group-header-row th.runtime-filters-header {
+  background: rgba(129, 161, 193, 0.15);
+  color: var(--info);
+  border-bottom: 2px solid var(--info);
+}
+
+/* Storage - purple */
+tr.group-header-row th.storage-header {
+  background: rgba(180, 142, 173, 0.15);
+  color: var(--purple);
+  border-bottom: 2px solid var(--purple);
+}
+
 /* Add subtle left border to first column of each group */
 th.group-start,
 td.group-start {
@@ -694,6 +747,30 @@ td.time {
 
 td.rows {
   color: var(--info);
+}
+
+/* Time with percentage display */
+.time-pct {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  margin-left: 0.25rem;
+}
+
+/* Skew indicator styling */
+td.skew {
+  font-weight: 600;
+}
+
+td.skew-ok {
+  color: var(--success);
+}
+
+td.skew-warning {
+  color: var(--warning);
+}
+
+td.skew-danger {
+  color: var(--danger);
 }
 
 /* ========================================

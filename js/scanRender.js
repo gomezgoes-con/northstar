@@ -5,49 +5,53 @@
 import { parseNumericValue, sumMetric, formatNumber, formatBytes } from './utils.js';
 import { setupNodeLinkHandlers } from './nodePopup.js';
 
-// Define which metrics we want to display (from user requirements)
+// Define which metrics we want to display
 // Columns are grouped - columns with the same 'group' value will share a header
 // group: null means no group header (standalone column)
 // description: tooltip text explaining the metric
+// headerClass: CSS class for colored group headers
 export const METRICS_CONFIG = [
-  // === General Info (no group) ===
-  { key: 'Table',                           label: 'Table',              source: 'unique', type: 'string',    group: null,       sticky: true, description: 'Name of the table being scanned' },
-  { key: 'planNodeId',                      label: 'Node ID',            source: 'meta',   type: 'number',    group: null,       clickable: true, description: 'Plan node identifier in the query execution tree' },
-  { key: 'Predicates',                      label: 'Predicates',         source: 'unique', type: 'predicate', group: null, description: 'Filter conditions applied during the scan' },
+  // === Summary (identity info) ===
+  { key: 'Table',                           label: 'Table',              source: 'unique', type: 'string',    group: 'Summary',       sticky: true, description: 'Name of the table being scanned' },
+  { key: 'planNodeId',                      label: 'Node ID',            source: 'meta',   type: 'number',    group: 'Summary',       clickable: true, description: 'Plan node identifier in the query execution tree' },
+  { key: 'Predicates',                      label: 'Predicates',         source: 'unique', type: 'predicate', group: 'Summary', description: 'Filter conditions applied during the scan' },
 
-  // === Timing Metrics (no group) ===
-  { key: 'PullRowNum',                      label: 'Pull Rows',          source: 'common', type: 'rows',      group: null, description: 'Cumulative number of output rows for the operator' },
-  { key: 'JoinRuntimeFilterInputRows',      label: 'RF Input',           source: 'common', type: 'rows',      group: null, description: 'Rows received before applying runtime filter from joins' },
-  { key: 'JoinRuntimeFilterOutputRows',     label: 'RF Output',          source: 'common', type: 'rows',      group: null, description: 'Rows remaining after applying runtime filter (lower = more filtered)' },
-  { key: 'BytesRead',                       label: 'Bytes Read',         source: 'unique', type: 'bytes',     group: null, description: 'Total bytes read from storage' },
-  { key: 'OperatorTotalTime',               label: 'Operator Time',      source: 'common', type: 'time',      group: 'Run Time', description: 'Total wall-clock time spent in this operator' },
-  { key: 'ScanTime',                        label: 'Scan Time',          source: 'unique', type: 'time',      group: 'Run Time', description: 'Time spent performing the actual scan operation' },
-  { key: 'IOTaskExecTime',                  label: 'IO Exec',            source: 'unique', type: 'time',      group: 'Scan Time', description: 'Time spent executing I/O operations (reading from disk/cache)' },
-  { key: 'IOTaskWaitTime',                  label: 'IO Wait',            source: 'unique', type: 'time',      group: 'Scan Time', description: 'Time spent waiting for I/O operations to complete' },
-  { key: 'SegmentInit',                     label: 'Seg Init',           source: 'unique', type: 'time',      group: 'Scan Time', description: 'Time spent initializing segments before reading' },
-  { key: 'SegmentRead',                     label: 'Seg Read',           source: 'unique', type: 'time',      group: 'Scan Time', description: 'Time spent reading data from segments' },
+  // === Output (what the scan produces) ===
+  { key: 'PullRowNum',                      label: 'Pull Rows',          source: 'common', type: 'rows',      group: 'Output', headerClass: 'output-header', description: 'Final output rows from the scan operator' },
+  { key: 'BytesRead',                       label: 'Bytes Read',         source: 'unique', type: 'bytes',     group: 'Output', headerClass: 'output-header', description: 'Total bytes read from storage' },
 
-  // === Row Metrics (no group) ===
-  { key: 'RowsRead',                        label: 'Rows Read',          source: 'unique', type: 'rows',      group: 'Pred Filters', description: 'Rows read after applying predicate filters' },
-  { key: 'PredFilterRows',                  label: 'Pred Filter',        source: 'unique', type: 'rows',      group: 'Pred Filters', description: 'Rows filtered out by predicate evaluation' },
-  { key: 'LateMaterializeRows',             label: 'Late Mat',           source: 'unique', type: 'rows',      group: 'Pred Filters', description: 'Rows processed using late materialization optimization' },
-  { key: 'RawRowsRead',                     label: 'Raw Rows Read',      source: 'unique', type: 'rows',      group: 'Pred Filters', description: 'Total raw rows read before any filtering' },
+  // === Operator Time (top-level timing + skew) ===
+  { key: 'OperatorTotalTime',               label: 'Operator Time',      source: 'common', type: 'time', group: 'Operator Time', headerClass: 'operator-time-header', description: 'Total time spent in this operator' },
+  { key: 'OperatorSkew',                    label: 'Skew',               source: 'computed', type: 'skew',    group: 'Operator Time', headerClass: 'operator-time-header', description: 'Max/min ratio across tablets - high values indicate data skew' },
 
-  // === Index Filters (GROUPED) ===
-  { key: 'DelVecFilterRows',                label: 'Del Vec',            source: 'unique', type: 'rows',      group: 'Index Filters', description: 'Rows filtered by delete vector (marks deleted rows)' },
-  { key: 'ZoneMapIndexFilterRows',          label: 'Zone Map',           source: 'unique', type: 'rows',      group: 'Index Filters', description: 'Rows filtered using zone map index (min/max per column chunk)' },
-  { key: 'SegmentZoneMapFilterRows',        label: 'Seg Zone Map',       source: 'unique', type: 'rows',      group: 'Index Filters', description: 'Rows filtered at segment level using zone maps' },
-  { key: 'BloomFilterFilterRows',           label: 'Bloom',              source: 'unique', type: 'rows',      group: 'Index Filters', description: 'Rows filtered using bloom filter index' },
+  // === Scan Time (hierarchical breakdown) ===
+  { key: 'ScanTime',                        label: 'Scan Time',          source: 'unique', type: 'time',      group: 'Scan Time', headerClass: 'scan-time-header', description: 'Time spent performing the actual scan operation' },
+  { key: 'IOTaskWaitTime',                  label: 'IO Wait',            source: 'unique', type: 'timeWithScanPct', group: 'Scan Time', headerClass: 'scan-time-header', description: 'Time waiting for I/O - high % indicates thread-pool starvation' },
+  { key: 'IOTaskExecTime',                  label: 'IO Exec',            source: 'unique', type: 'timeWithScanPct', group: 'Scan Time', headerClass: 'scan-time-header', description: 'Time executing I/O operations (reading from disk/cache)' },
+  { key: 'SegmentInit',                     label: 'Seg Init',           source: 'unique', type: 'time',      group: 'Scan Time', headerClass: 'scan-time-header', description: 'Time initializing segments - high values indicate fragmentation' },
+  { key: 'SegmentRead',                     label: 'Seg Read',           source: 'unique', type: 'time',      group: 'Scan Time', headerClass: 'scan-time-header', description: 'Time spent reading data from segments' },
 
-  // === Short Key Filtering (GROUPED) ===
-  { key: 'RemainingRowsAfterShortKeyFilter',label: 'Rows After ShortKey',source: 'unique', type: 'rows',      group: 'Short Key', description: 'Rows remaining after short key prefix filtering' },
-  { key: 'ShortKeyFilterRows',              label: 'ShortKey Filter',    source: 'unique', type: 'rows',      group: 'Short Key', description: 'Rows filtered using short key index (first N sort key columns)' },
+  // === Index Filters (storage-tier filtering) ===
+  { key: 'ZoneMapIndexFilterRows',          label: 'Zone Map',           source: 'unique', type: 'rows',      group: 'Index Filters', headerClass: 'index-filters-header', description: 'Rows filtered using zone map index (min/max per column chunk)' },
+  { key: 'SegmentZoneMapFilterRows',        label: 'Seg Zone Map',       source: 'unique', type: 'rows',      group: 'Index Filters', headerClass: 'index-filters-header', description: 'Rows filtered at segment level using zone maps' },
+  { key: 'BloomFilterFilterRows',           label: 'Bloom',              source: 'unique', type: 'rows',      group: 'Index Filters', headerClass: 'index-filters-header', description: 'Rows filtered using bloom filter index' },
+  { key: 'ShortKeyFilterRows',              label: 'ShortKey',           source: 'unique', type: 'rows',      group: 'Index Filters', headerClass: 'index-filters-header', description: 'Rows filtered using short key index (first N sort key columns)' },
+  { key: 'DelVecFilterRows',                label: 'Del Vec',            source: 'unique', type: 'rows',      group: 'Index Filters', headerClass: 'index-filters-header', description: 'Rows filtered by delete vector - high values indicate need for compaction' },
 
-  // === Scan Structure (GROUPED) ===
-  { key: 'TabletCount',                     label: 'Tablets',            source: 'unique', type: 'number',    group: 'Scan Structure', description: 'Number of tablets scanned (data partitions)' },
-  { key: 'RowsetsReadCount',                label: 'Rowsets',            source: 'unique', type: 'number',    group: 'Scan Structure', description: 'Number of rowsets read (groups of segments)' },
-  { key: 'SegmentsReadCount',               label: 'Segments',           source: 'unique', type: 'number',    group: 'Scan Structure', description: 'Number of segments read (columnar storage files)' },
-  { key: 'PagesCountTotal',                 label: 'Pages',              source: 'unique', type: 'number',    group: 'Scan Structure', description: 'Total pages read from column files' },
+  // === Predicate Filters (predicate pushdown effectiveness) ===
+  { key: 'RawRowsRead',                     label: 'Raw Rows',           source: 'unique', type: 'rows',      group: 'Predicate Filters', headerClass: 'pred-filters-header', description: 'Total raw rows read after index filtering' },
+  { key: 'PredFilterRows',                  label: 'Pred Filter',        source: 'unique', type: 'rows',      group: 'Predicate Filters', headerClass: 'pred-filters-header', description: 'Rows filtered out by predicate evaluation' },
+  { key: 'RowsRead',                        label: 'Rows Read',          source: 'unique', type: 'rows',      group: 'Predicate Filters', headerClass: 'pred-filters-header', description: 'Rows remaining after predicate filters' },
+  { key: 'PushdownPredicates',              label: 'Pushdown Count',     source: 'unique', type: 'number',    group: 'Predicate Filters', headerClass: 'pred-filters-header', description: 'Number of predicates pushed to storage - 0 indicates pushdown issues' },
+
+  // === Runtime Filters (join-pushed filters) ===
+  { key: 'JoinRuntimeFilterInputRows',      label: 'RF Input',           source: 'common', type: 'rows',      group: 'Runtime Filters', headerClass: 'runtime-filters-header', description: 'Rows before applying runtime filters from joins' },
+  { key: 'JoinRuntimeFilterOutputRows',     label: 'RF Output',          source: 'common', type: 'rows',      group: 'Runtime Filters', headerClass: 'runtime-filters-header', description: 'Rows after runtime filters - lower = more effective filtering' },
+
+  // === Storage (fragmentation indicators) ===
+  { key: 'TabletCount',                     label: 'Tablets',            source: 'unique', type: 'number',    group: 'Storage', headerClass: 'storage-header', description: 'Number of tablets scanned (data partitions)' },
+  { key: 'RowsetsReadCount',                label: 'Rowsets',            source: 'unique', type: 'number',    group: 'Storage', headerClass: 'storage-header', description: 'Number of rowsets - high count indicates fragmentation' },
+  { key: 'SegmentsReadCount',               label: 'Segments',           source: 'unique', type: 'number',    group: 'Storage', headerClass: 'storage-header', description: 'Number of segments read (columnar storage files)' },
 ];
 
 // Store data globally for sorting
@@ -170,6 +174,7 @@ function renderTable(scans) {
   groupHeaderRow.className = 'group-header-row';
   
   let currentGroup = null;
+  let currentHeaderClass = null;
   let colspan = 0;
   let groupCells = [];
 
@@ -180,13 +185,14 @@ function renderTable(scans) {
     if (col.group !== currentGroup) {
       // Save the previous group if it existed
       if (colspan > 0) {
-        groupCells.push({ group: currentGroup, colspan });
+        groupCells.push({ group: currentGroup, colspan, headerClass: currentHeaderClass });
       }
       // Track the start of a new group
       if (col.group !== null) {
         groupStartIndices.add(idx);
       }
       currentGroup = col.group;
+      currentHeaderClass = col.headerClass || null;
       colspan = 1;
     } else {
       colspan++;
@@ -194,7 +200,7 @@ function renderTable(scans) {
   });
   // Don't forget the last group
   if (colspan > 0) {
-    groupCells.push({ group: currentGroup, colspan });
+    groupCells.push({ group: currentGroup, colspan, headerClass: currentHeaderClass });
   }
 
   // Build the group header row
@@ -226,6 +232,10 @@ function renderTable(scans) {
         const th = document.createElement('th');
         th.colSpan = remaining;
         th.className = cell.group === null ? 'group-spacer' : '';
+        // Add headerClass if present
+        if (cell.headerClass) {
+          th.classList.add(cell.headerClass);
+        }
         th.textContent = cell.group || '';
         groupHeaderRow.appendChild(th);
       }
@@ -238,6 +248,10 @@ function renderTable(scans) {
         th.textContent = '';
       } else {
         th.textContent = cell.group;
+        // Add headerClass if present
+        if (cell.headerClass) {
+          th.classList.add(cell.headerClass);
+        }
       }
       groupHeaderRow.appendChild(th);
     }
@@ -285,20 +299,69 @@ function renderTable(scans) {
 }
 
 /**
+ * Compute skew ratio from max/min values
+ */
+function computeSkew(scan, metricKey) {
+  const maxKey = `__MAX_OF_${metricKey}`;
+  const minKey = `__MIN_OF_${metricKey}`;
+  const maxVal = parseNumericValue(scan.commonMetrics[maxKey] || scan.uniqueMetrics[maxKey]);
+  const minVal = parseNumericValue(scan.commonMetrics[minKey] || scan.uniqueMetrics[minKey]);
+
+  if (minVal === 0 || isNaN(minVal) || isNaN(maxVal)) {
+    return { ratio: 1, max: maxVal, min: minVal };
+  }
+  return { ratio: maxVal / minVal, max: maxVal, min: minVal };
+}
+
+/**
+ * Format skew ratio for display
+ */
+function formatSkewRatio(ratio) {
+  if (ratio < 1.1) return '1x';
+  if (ratio < 10) return ratio.toFixed(1) + 'x';
+  return Math.round(ratio) + 'x';
+}
+
+/**
+ * Get skew severity class
+ */
+function getSkewClass(ratio) {
+  if (ratio <= 2) return 'skew-ok';
+  if (ratio <= 10) return 'skew-warning';
+  return 'skew-danger';
+}
+
+/**
  * Render table body rows
  */
 function renderTableBody(scans) {
   const tbody = document.getElementById('tableBody');
 
   tbody.innerHTML = scans.map(scan => {
+    // Pre-compute values needed for percentages
+    const scanTime = parseNumericValue(scan.uniqueMetrics.ScanTime);
+
     const cells = METRICS_CONFIG.map((col, idx) => {
-      // Get value from commonMetrics, uniqueMetrics, or directly from scan object (meta)
-      const source = col.source === 'meta' ? scan : (col.source === 'common' ? scan.commonMetrics : scan.uniqueMetrics);
-      const value = source[col.key];
+      // Get value based on source type
+      let value;
+      if (col.source === 'meta') {
+        value = scan[col.key];
+      } else if (col.source === 'common') {
+        value = scan.commonMetrics[col.key];
+      } else if (col.source === 'unique') {
+        value = scan.uniqueMetrics[col.key];
+      } else if (col.source === 'computed') {
+        // Handle computed values
+        if (col.key === 'OperatorSkew') {
+          const skewData = computeSkew(scan, 'OperatorTotalTime');
+          value = skewData;
+        }
+      }
 
       // Apply styling based on type
       let displayValue = value ?? '-';
       let classNames = [];
+      let titleText = String(value || '');
 
       // Add group-start class for left border
       if (groupStartIndices.has(idx)) {
@@ -322,7 +385,8 @@ function renderTableBody(scans) {
         case 'predicate':
           classNames.push('predicate');
           // Truncate long predicates
-          if (displayValue.length > 50) {
+          if (typeof displayValue === 'string' && displayValue.length > 50) {
+            titleText = displayValue;
             displayValue = displayValue.substring(0, 50) + '...';
           }
           break;
@@ -331,6 +395,25 @@ function renderTableBody(scans) {
           break;
         case 'time':
           classNames.push('number', 'time');
+          break;
+        case 'timeWithScanPct':
+          classNames.push('number', 'time');
+          if (value && value !== '-' && scanTime > 0) {
+            const timeVal = parseNumericValue(value);
+            const pct = ((timeVal / scanTime) * 100).toFixed(1);
+            displayValue = `${value} <span class="time-pct">(${pct}%)</span>`;
+          }
+          break;
+        case 'skew':
+          classNames.push('number', 'skew');
+          if (value && typeof value === 'object') {
+            const skewClass = getSkewClass(value.ratio);
+            classNames.push(skewClass);
+            displayValue = formatSkewRatio(value.ratio);
+            titleText = `Max: ${value.max.toFixed(6)}s, Min: ${value.min.toFixed(6)}s`;
+          } else {
+            displayValue = '-';
+          }
           break;
         case 'rows':
           classNames.push('number', 'rows');
@@ -345,7 +428,7 @@ function renderTableBody(scans) {
         displayValue = `<span class="node-link" data-node-id="${value}">${displayValue}</span>`;
       }
 
-      return `<td class="${classNames.join(' ')}" title="${value || ''}">${displayValue}</td>`;
+      return `<td class="${classNames.join(' ')}" title="${titleText}">${displayValue}</td>`;
     }).join('');
 
     return `<tr>${cells}</tr>`;
@@ -362,7 +445,7 @@ function sortTable(th) {
   const key = th.dataset.key;
   const colIndex = parseInt(th.dataset.col);
   const config = METRICS_CONFIG[colIndex];
-  
+
   // Toggle direction if same column
   if (sortColumn === key) {
     sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
@@ -379,16 +462,26 @@ function sortTable(th) {
 
   // Sort the data
   currentData.sort((a, b) => {
-    const sourceA = config.source === 'meta' ? a : (config.source === 'common' ? a.commonMetrics : a.uniqueMetrics);
-    const sourceB = config.source === 'meta' ? b : (config.source === 'common' ? b.commonMetrics : b.uniqueMetrics);
-    
-    let valA = sourceA[key] ?? '';
-    let valB = sourceB[key] ?? '';
+    let valA, valB;
 
-    // Parse numeric values from strings like "18.636 KB" or "1.592ms"
-    if (config.type !== 'string' && config.type !== 'predicate') {
-      valA = parseNumericValue(valA);
-      valB = parseNumericValue(valB);
+    // Handle computed values
+    if (config.source === 'computed') {
+      if (key === 'OperatorSkew') {
+        valA = computeSkew(a, 'OperatorTotalTime').ratio;
+        valB = computeSkew(b, 'OperatorTotalTime').ratio;
+      }
+    } else {
+      const sourceA = config.source === 'meta' ? a : (config.source === 'common' ? a.commonMetrics : a.uniqueMetrics);
+      const sourceB = config.source === 'meta' ? b : (config.source === 'common' ? b.commonMetrics : b.uniqueMetrics);
+
+      valA = sourceA[key] ?? '';
+      valB = sourceB[key] ?? '';
+
+      // Parse numeric values from strings like "18.636 KB" or "1.592ms"
+      if (config.type !== 'string' && config.type !== 'predicate') {
+        valA = parseNumericValue(valA);
+        valB = parseNumericValue(valB);
+      }
     }
 
     // Compare
@@ -400,4 +493,3 @@ function sortTable(th) {
   // Re-render table body
   renderTableBody(currentData);
 }
-
