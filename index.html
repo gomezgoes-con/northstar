@@ -391,6 +391,30 @@
             <div class="minimap-viewport"></div>
           </div>
         </div>
+        <div class="plan-search-bar">
+          <span class="search-help" id="planSearchHelp">?</span>
+          <div class="search-help-tooltip" id="planSearchHelpTooltip">
+            <div class="help-section">Selectors</div>
+            <div class="help-row"><code>node=5</code> <span>single node</span></div>
+            <div class="help-row"><code>+node=5</code> <span>with ancestors</span></div>
+            <div class="help-row"><code>node=5+</code> <span>with descendants</span></div>
+            <div class="help-row"><code>+node=5+</code> <span>full lineage</span></div>
+            <div class="help-row"><code>type=scan</code> <span>scan / join / exchange</span></div>
+            <div class="help-section">Operators</div>
+            <div class="help-row"><code>&</code> <span>AND (intersection)</span></div>
+            <div class="help-row"><code>,</code> <span>OR (union)</span></div>
+            <div class="help-section">Examples</div>
+            <div class="help-row"><code>node=5+ & type=scan</code> <span>scans downstream of 5</span></div>
+            <div class="help-row"><code>type=scan, type=join</code> <span>all scans or joins</span></div>
+            <div class="help-row help-keys"><kbd>Enter</kbd> <span>apply</span> <kbd>Esc</kbd> <span>clear</span> <kbd>/</kbd> <span>focus</span></div>
+          </div>
+          <div class="search-filter-area" id="planSearchArea">
+            <div class="filter-pills" id="planFilterPills"></div>
+            <input type="text" id="planSearchInput" placeholder="filter nodes...">
+          </div>
+          <button id="planSearchClear" class="search-clear" title="Clear (Esc)">×</button>
+          <button id="planSearchHideToggle" class="search-toggle" title="Toggle mode">dim</button>
+        </div>
       </div>
     </div>
 

@@ -33,6 +33,11 @@ let currentContentSize = { width: 0, height: 0 };
 let indicatorTimeout = null;
 let currentNodePositions = {}; // For minimap rendering
 
+// Filter state
+let currentGraph = null;      // Store graph for filtering
+let currentRootId = null;     // Store root for traversal
+let currentParentMap = null;  // Cached parent map for upstream traversal
+
 // DOM elements
 let planDropZone, planFileInput, planContainer, planCanvas;
 
@@ -133,6 +138,9 @@ export function setupPlanDropZone() {
   document.getElementById('viewportZoomIn')?.addEventListener('click', () => zoomToCenter(ZOOM_STEP, true));
   document.getElementById('viewportZoomOut')?.addEventListener('click', () => zoomToCenter(1 / ZOOM_STEP, true));
   document.getElementById('viewportFit')?.addEventListener('click', () => fitToView(true));
+
+  // Setup search bar
+  setupPlanSearch();
 }
 
 /**
@@ -265,6 +273,54 @@ function fitToView(smooth = true) {
   camera.x = -(containerRect.width / camera.zoom - contentWidth) / 2;
   camera.y = -(containerRect.height / camera.zoom - contentHeight) / 2;
 
+  updateTransform(smooth);
+}
+
+/**
+ * Fit view to show specific nodes
+ * @param {Set<number>} nodeIds - Set of node IDs to fit
+ * @param {boolean} smooth - Whether to animate the transition
+ */
+function fitToNodes(nodeIds, smooth = true) {
+  if (!planCanvas || !nodeIds || nodeIds.size === 0) return;
+
+  // Calculate bounding box of matching nodes
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+
+  for (const id of nodeIds) {
+    const pos = currentNodePositions[id];
+    if (pos) {
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + NODE_WIDTH);
+      maxY = Math.max(maxY, pos.y + NODE_HEIGHT);
+    }
+  }
+
+  if (minX === Infinity) return; // No valid positions found
+
+  const containerRect = planCanvas.getBoundingClientRect();
+  const contentWidth = maxX - minX;
+  const contentHeight = maxY - minY;
+
+  if (contentWidth === 0 || contentHeight === 0) return;
+
+  // Calculate scale to fit with padding
+  const padding = 60;
+  const scaleX = (containerRect.width - padding * 2) / contentWidth;
+  const scaleY = (containerRect.height - padding * 2) / contentHeight;
+  const scale = Math.min(scaleX, scaleY, 2); // Allow zoom up to 200% for small selections
+
+  camera.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scale));
+
+  // Center on the bounding box
+  const centerX = minX + contentWidth / 2;
+  const centerY = minY + contentHeight / 2;
+  camera.x = centerX - (containerRect.width / camera.zoom) / 2;
+  camera.y = centerY - (containerRect.height / camera.zoom) / 2;
+
+  clampCameraToBounds();
   updateTransform(smooth);
 }
 
@@ -590,9 +646,15 @@ function cleanupViewport() {
   currentContentSize = { width: 0, height: 0 };
   currentNodePositions = {};
 
+  // Clear filter state
+  currentGraph = null;
+  currentRootId = null;
+  currentParentMap = null;
+
   // Hide UI
   document.querySelector('.canvas-toolbar')?.classList.remove('visible');
   document.querySelector('.viewport-minimap')?.classList.remove('visible');
+  document.querySelector('.plan-search-bar')?.classList.remove('visible');
 
   // Reset cursor
   planCanvas?.classList.remove('panning');
@@ -735,7 +797,7 @@ function getScanMetrics(metricsData) {
  */
 function renderFromTopology(topology, metricsMap) {
   const { rootId, nodes } = topology;
-  
+
   const graph = {};
   for (const node of nodes) {
     graph[node.id] = {
@@ -747,13 +809,18 @@ function renderFromTopology(topology, metricsMap) {
       metrics: metricsMap[node.id] || null
     };
   }
-  
+
+  // Store graph reference for filtering
+  currentGraph = graph;
+  currentRootId = rootId;
+  currentParentMap = null;  // Reset parent map cache
+
   const root = graph[rootId];
   if (!root) {
     alert('Could not find root node in topology');
     return;
   }
-  
+
   const layout = calculateTreeLayout(root, graph);
   renderTreeWithSVG(layout, graph);
 
@@ -769,6 +836,10 @@ function renderFromTopology(topology, metricsMap) {
   // Show UI elements
   document.querySelector('.canvas-toolbar')?.classList.add('visible');
   document.querySelector('.viewport-minimap')?.classList.add('visible');
+  document.querySelector('.plan-search-bar')?.classList.add('visible');
+
+  // Clear any previous filter
+  clearFilter();
 }
 
 /**
@@ -1238,6 +1309,636 @@ function hasExpandableMetrics(node) {
   return isScanOperator(node.name) || isJoinOperator(node.name) || isExchangeOperator(node.name);
 }
 
+// ========================================
+// Filter Functions
+// ========================================
+
+/**
+ * Parse a single selector (node or type filter)
+ * @param {string} part - A single selector like "node=5" or "type=scan"
+ * @returns {Object|null} - { type: 'node'|'type', ... } or null if invalid
+ */
+function parseSelector(part) {
+  // Type filter: type=scan, type=join, type=exchange
+  const typeMatch = part.match(/^type=(\w+)$/i);
+  if (typeMatch) {
+    const validTypes = ['scan', 'join', 'exchange', 'aggregate', 'project', 'union'];
+    const type = typeMatch[1].toLowerCase();
+    if (validTypes.includes(type)) {
+      return { selectorType: 'type', typeFilter: type };
+    }
+    return null;
+  }
+
+  // Node selector: +node=1+, node=1, +node=1, node=1+
+  const nodeMatch = part.match(/^(\+)?node=(\d+)(\+)?$/i);
+  if (nodeMatch) {
+    const nodeId = parseInt(nodeMatch[2]);
+    if (!isNaN(nodeId) && nodeId >= 0) {
+      return {
+        selectorType: 'node',
+        nodeId,
+        upstream: !!nodeMatch[1],
+        downstream: !!nodeMatch[3]
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse a filter query string into a structured specification
+ * Syntax:
+ *   node=N        - single node
+ *   +node=N       - node + ancestors (upstream)
+ *   node=N+       - node + descendants (downstream)
+ *   +node=N+      - node + full lineage
+ *   type=scan     - all scan operators
+ *   type=join     - all join operators
+ *   type=exchange - all exchange operators
+ *   --hide        - hide non-matching (default: dim)
+ *
+ * Operators:
+ *   , or "or"     - OR (union)
+ *   & or "and"    - AND (intersection), binds tighter than OR
+ *
+ * Examples:
+ *   node=5+ & type=scan     - descendants of 5 that are scans
+ *   node=5, type=join       - node 5 OR any join
+ *   node=5+ & type=scan, type=join  - (descendants of 5 that are scans) OR any join
+ *
+ * @param {string} query - The filter query
+ * @returns {Object} - { orGroups: [...], hideMode: boolean }
+ */
+function parseFilterQuery(query) {
+  if (!query || !query.trim()) {
+    return { orGroups: [], hideMode: false };
+  }
+
+  let hideMode = false;
+
+  // Check for --hide modifier
+  if (query.includes('--hide')) {
+    hideMode = true;
+    query = query.replace(/--hide/g, '').trim();
+  }
+
+  // Split by OR operators: comma or "or" (with word boundaries)
+  // But preserve "and" and "&" within groups
+  const orParts = query.split(/\s*(?:,|\bor\b)\s*/i).filter(Boolean);
+
+  const orGroups = [];
+
+  for (const orPart of orParts) {
+    // Split by AND operators: & or "and"
+    const andParts = orPart.split(/\s*(?:&|\band\b)\s*/i).filter(Boolean);
+
+    const group = {
+      nodeSelectors: [],
+      typeFilters: []
+    };
+
+    for (const part of andParts) {
+      const selector = parseSelector(part.trim());
+      if (selector) {
+        if (selector.selectorType === 'node') {
+          group.nodeSelectors.push(selector);
+        } else if (selector.selectorType === 'type') {
+          group.typeFilters.push(selector.typeFilter);
+        }
+      }
+    }
+
+    // Only add non-empty groups
+    if (group.nodeSelectors.length > 0 || group.typeFilters.length > 0) {
+      orGroups.push(group);
+    }
+  }
+
+  return { orGroups, hideMode };
+}
+
+/**
+ * Build a parent map from the graph (child -> parent)
+ * @param {Object} graph - The graph object with nodes
+ * @param {number} rootId - The root node ID
+ * @returns {Map<number, number>} - Map of childId -> parentId
+ */
+function buildParentMap(graph, rootId) {
+  const parentMap = new Map();
+  const visited = new Set();
+
+  function traverse(nodeId) {
+    if (visited.has(nodeId)) return;
+    visited.add(nodeId);
+
+    const node = graph[nodeId];
+    if (!node || !node.children) return;
+
+    for (const childId of node.children) {
+      parentMap.set(childId, nodeId);
+      traverse(childId);
+    }
+  }
+
+  traverse(rootId);
+  return parentMap;
+}
+
+/**
+ * Get all upstream (ancestor) nodes for a given node
+ * @param {number} nodeId - Starting node ID
+ * @param {Map<number, number>} parentMap - Parent mapping
+ * @returns {Set<number>} - Set of ancestor node IDs (includes the node itself)
+ */
+function getUpstreamNodes(nodeId, parentMap) {
+  const upstream = new Set([nodeId]);
+  let currentId = nodeId;
+
+  while (parentMap.has(currentId)) {
+    currentId = parentMap.get(currentId);
+    upstream.add(currentId);
+  }
+
+  return upstream;
+}
+
+/**
+ * Get all downstream (descendant) nodes for a given node
+ * @param {number} nodeId - Starting node ID
+ * @param {Object} graph - The graph object
+ * @returns {Set<number>} - Set of descendant node IDs (includes the node itself)
+ */
+function getDownstreamNodes(nodeId, graph) {
+  const downstream = new Set();
+  const queue = [nodeId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    if (downstream.has(currentId)) continue;
+    downstream.add(currentId);
+
+    const node = graph[currentId];
+    if (node && node.children) {
+      queue.push(...node.children);
+    }
+  }
+
+  return downstream;
+}
+
+/**
+ * Get nodes matching a single node selector
+ * @param {Object} selector - { nodeId, upstream, downstream }
+ * @returns {Set<number>} - Set of matching node IDs
+ */
+function getNodesForSelector(selector) {
+  const nodes = new Set();
+
+  if (!currentGraph[selector.nodeId]) return nodes;
+
+  nodes.add(selector.nodeId);
+
+  if (selector.upstream && currentParentMap) {
+    const upstream = getUpstreamNodes(selector.nodeId, currentParentMap);
+    upstream.forEach(id => nodes.add(id));
+  }
+
+  if (selector.downstream) {
+    const downstream = getDownstreamNodes(selector.nodeId, currentGraph);
+    downstream.forEach(id => nodes.add(id));
+  }
+
+  return nodes;
+}
+
+/**
+ * Get nodes matching a type filter
+ * @param {string} typeFilter - 'scan', 'join', etc.
+ * @returns {Set<number>} - Set of matching node IDs
+ */
+function getNodesForType(typeFilter) {
+  const nodes = new Set();
+
+  for (const [id, node] of Object.entries(currentGraph)) {
+    const nodeType = getNodeClass(node.name);
+    if (nodeType === typeFilter) {
+      nodes.add(parseInt(id));
+    }
+  }
+
+  return nodes;
+}
+
+/**
+ * Compute intersection of two sets
+ */
+function setIntersection(setA, setB) {
+  const result = new Set();
+  for (const item of setA) {
+    if (setB.has(item)) {
+      result.add(item);
+    }
+  }
+  return result;
+}
+
+/**
+ * Compute union of two sets
+ */
+function setUnion(setA, setB) {
+  const result = new Set(setA);
+  for (const item of setB) {
+    result.add(item);
+  }
+  return result;
+}
+
+/**
+ * Apply filter to the current graph visualization
+ * @param {string} query - The filter query string
+ * @returns {Set<number>|null} - Set of matching node IDs, or null if no filter
+ */
+function applyFilter(query) {
+  if (!currentGraph || !planCanvas) return null;
+
+  const spec = parseFilterQuery(query);
+
+  // If no filter criteria, just reset visuals (don't clear input)
+  if (spec.orGroups.length === 0) {
+    resetFilterVisuals();
+    return null;
+  }
+
+  // Build parent map if not cached
+  if (!currentParentMap && currentRootId !== null) {
+    currentParentMap = buildParentMap(currentGraph, currentRootId);
+  }
+
+  // Process OR groups - union the results
+  let matchingNodes = new Set();
+
+  for (const group of spec.orGroups) {
+    // For each AND group, compute intersection of all conditions
+    let groupNodes = null;
+
+    // Process node selectors within the AND group
+    for (const selector of group.nodeSelectors) {
+      const selectorNodes = getNodesForSelector(selector);
+      if (groupNodes === null) {
+        groupNodes = selectorNodes;
+      } else {
+        groupNodes = setIntersection(groupNodes, selectorNodes);
+      }
+    }
+
+    // Process type filters within the AND group
+    for (const typeFilter of group.typeFilters) {
+      const typeNodes = getNodesForType(typeFilter);
+      if (groupNodes === null) {
+        groupNodes = typeNodes;
+      } else {
+        groupNodes = setIntersection(groupNodes, typeNodes);
+      }
+    }
+
+    // Union this AND group's result with overall results
+    if (groupNodes) {
+      matchingNodes = setUnion(matchingNodes, groupNodes);
+    }
+  }
+
+  // Apply CSS classes to nodes
+  const dimClass = spec.hideMode ? 'filter-hidden' : 'filter-dimmed';
+
+  for (const id of Object.keys(currentGraph)) {
+    const nodeEl = document.getElementById(`node-${id}`);
+    if (!nodeEl) continue;
+
+    nodeEl.classList.remove('filter-dimmed', 'filter-hidden', 'filter-match');
+
+    if (matchingNodes.has(parseInt(id))) {
+      nodeEl.classList.add('filter-match');
+    } else {
+      nodeEl.classList.add(dimClass);
+    }
+  }
+
+  // Apply CSS classes to edges
+  const svg = planCanvas.querySelector('.plan-svg');
+  if (svg) {
+    svg.querySelectorAll('path[data-from]').forEach(path => {
+      const fromId = parseInt(path.dataset.from);
+      const toId = parseInt(path.dataset.to);
+
+      path.classList.remove('filter-dimmed', 'filter-hidden');
+
+      // Edge is visible only if both endpoints are matching
+      if (matchingNodes.has(fromId) && matchingNodes.has(toId)) {
+        // Keep visible
+      } else {
+        path.classList.add(dimClass);
+      }
+    });
+
+    // Handle edge labels (rect and text with data-edge-label)
+    svg.querySelectorAll('[data-edge-label]').forEach(el => {
+      const [fromId, toId] = el.dataset.edgeLabel.split('-').map(Number);
+
+      el.classList.remove('filter-dimmed', 'filter-hidden');
+
+      if (matchingNodes.has(fromId) && matchingNodes.has(toId)) {
+        // Keep visible
+      } else {
+        el.classList.add(dimClass);
+      }
+    });
+  }
+
+  // Update toggle button state if hide mode
+  const hideToggle = document.getElementById('planSearchHideToggle');
+  if (hideToggle) {
+    if (spec.hideMode) {
+      hideToggle.classList.add('hide-mode');
+      hideToggle.textContent = 'hide';
+    } else {
+      hideToggle.classList.remove('hide-mode');
+      hideToggle.textContent = 'dim';
+    }
+  }
+
+  return matchingNodes;
+}
+
+/**
+ * Reset filter visuals only (don't clear input)
+ * Used when query is incomplete/invalid while typing
+ */
+function resetFilterVisuals() {
+  // Clear node classes
+  planCanvas?.querySelectorAll('.plan-node').forEach(node => {
+    node.classList.remove('filter-dimmed', 'filter-hidden', 'filter-match');
+  });
+
+  // Clear edge classes
+  planCanvas?.querySelectorAll('.plan-svg path, .plan-svg rect, .plan-svg text').forEach(el => {
+    el.classList.remove('filter-dimmed', 'filter-hidden');
+  });
+}
+
+/**
+ * Clear all filter states including input and pills
+ */
+function clearFilter() {
+  resetFilterVisuals();
+
+  // Clear search input
+  const searchInput = document.getElementById('planSearchInput');
+  if (searchInput) {
+    searchInput.value = '';
+    searchInput.style.display = '';
+  }
+
+  // Clear pills
+  const pillsContainer = document.getElementById('planFilterPills');
+  if (pillsContainer) pillsContainer.innerHTML = '';
+
+  // Reset toggle button
+  const hideToggle = document.getElementById('planSearchHideToggle');
+  if (hideToggle) {
+    hideToggle.classList.remove('hide-mode');
+    hideToggle.textContent = 'dim';
+  }
+}
+
+/**
+ * Convert parsed filter spec to pill elements
+ * @param {Object} spec - Parsed filter spec from parseFilterQuery
+ * @returns {string} - HTML string for pills
+ */
+function renderFilterPills(spec) {
+  if (!spec.orGroups || spec.orGroups.length === 0) return '';
+
+  const pillsHtml = [];
+
+  spec.orGroups.forEach((group, groupIndex) => {
+    // Add OR operator between groups
+    if (groupIndex > 0) {
+      pillsHtml.push('<span class="filter-operator">,</span>');
+    }
+
+    const groupPills = [];
+
+    // Add node selector pills
+    for (const sel of group.nodeSelectors) {
+      const prefix = sel.upstream ? '+' : '';
+      const suffix = sel.downstream ? '+' : '';
+      const label = `${prefix}node=${sel.nodeId}${suffix}`;
+      groupPills.push(`<span class="filter-pill" data-selector="${label}"><span class="pill-text">${label}</span><button class="pill-remove" type="button">×</button></span>`);
+    }
+
+    // Add type filter pills
+    for (const type of group.typeFilters) {
+      const label = `type=${type}`;
+      groupPills.push(`<span class="filter-pill" data-selector="${label}"><span class="pill-text">${label}</span><button class="pill-remove" type="button">×</button></span>`);
+    }
+
+    // Join pills in this AND group with & operator
+    groupPills.forEach((pill, i) => {
+      if (i > 0) {
+        pillsHtml.push('<span class="filter-operator">&</span>');
+      }
+      pillsHtml.push(pill);
+    });
+  });
+
+  return pillsHtml.join('');
+}
+
+/**
+ * Get current filter query from pills
+ * @returns {string} - Query string reconstructed from pills
+ */
+function getQueryFromPills() {
+  const pillsContainer = document.getElementById('planFilterPills');
+  if (!pillsContainer) return '';
+
+  const parts = [];
+  let currentGroup = [];
+
+  pillsContainer.childNodes.forEach(node => {
+    if (node.classList?.contains('filter-pill')) {
+      currentGroup.push(node.dataset.selector);
+    } else if (node.classList?.contains('filter-operator')) {
+      const op = node.textContent.trim();
+      if (op === ',') {
+        // OR - start new group
+        if (currentGroup.length > 0) {
+          parts.push(currentGroup.join(' & '));
+          currentGroup = [];
+        }
+      }
+      // & is implicit within group
+    }
+  });
+
+  // Add last group
+  if (currentGroup.length > 0) {
+    parts.push(currentGroup.join(' & '));
+  }
+
+  return parts.join(', ');
+}
+
+/**
+ * Setup plan search bar event handlers
+ */
+function setupPlanSearch() {
+  const searchInput = document.getElementById('planSearchInput');
+  const searchArea = document.getElementById('planSearchArea');
+  const pillsContainer = document.getElementById('planFilterPills');
+  const clearBtn = document.getElementById('planSearchClear');
+  const hideToggle = document.getElementById('planSearchHideToggle');
+
+  if (!searchInput || !pillsContainer) return;
+
+  // Helper to get current query (from input or pills)
+  const getCurrentQuery = () => {
+    if (searchInput.style.display !== 'none' && searchInput.value) {
+      return searchInput.value;
+    }
+    return getQueryFromPills();
+  };
+
+  // Helper to apply current filter and show pills
+  const applyCurrentFilter = (zoomToResults = true) => {
+    let query = searchInput.value.trim();
+    if (!query) return;
+
+    // Append --hide if toggle is active
+    const isHideMode = hideToggle?.classList.contains('hide-mode');
+    let fullQuery = query;
+    if (isHideMode && !query.includes('--hide')) {
+      fullQuery += ' --hide';
+    }
+
+    // Parse and apply filter
+    const spec = parseFilterQuery(fullQuery);
+    if (spec.orGroups.length > 0) {
+      // Render pills
+      pillsContainer.innerHTML = renderFilterPills(spec);
+      searchInput.style.display = 'none';
+      searchInput.value = query; // Keep original query without --hide
+
+      // Apply the filter and zoom to results
+      const matchingNodes = applyFilter(fullQuery);
+      if (zoomToResults && matchingNodes && matchingNodes.size > 0) {
+        fitToNodes(matchingNodes, true);
+      }
+    }
+  };
+
+  // Helper to switch to edit mode
+  const switchToEditMode = () => {
+    const query = getQueryFromPills();
+    pillsContainer.innerHTML = '';
+    searchInput.style.display = '';
+    searchInput.value = query;
+    searchInput.focus();
+    searchInput.select();
+  };
+
+  // Apply filter on Enter key
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyCurrentFilter();
+      searchInput.blur();
+    } else if (e.key === 'Escape') {
+      clearFilter();
+      searchInput.blur();
+    }
+  });
+
+  // Click on search area to switch to edit mode (when pills are shown)
+  searchArea?.addEventListener('click', (e) => {
+    // Don't switch if clicking on a remove button
+    if (e.target.classList.contains('pill-remove')) return;
+
+    // If pills are shown, switch to edit mode
+    if (pillsContainer.children.length > 0) {
+      switchToEditMode();
+    }
+  });
+
+  // Handle pill remove button clicks
+  pillsContainer.addEventListener('click', (e) => {
+    if (e.target.classList.contains('pill-remove')) {
+      e.stopPropagation();
+      const pill = e.target.closest('.filter-pill');
+      if (pill) {
+        // Remove the pill
+        const prevSibling = pill.previousElementSibling;
+        const nextSibling = pill.nextElementSibling;
+
+        pill.remove();
+
+        // Clean up adjacent operator
+        if (prevSibling?.classList.contains('filter-operator')) {
+          prevSibling.remove();
+        } else if (nextSibling?.classList.contains('filter-operator')) {
+          nextSibling.remove();
+        }
+
+        // Re-apply filter with remaining pills
+        const query = getQueryFromPills();
+        if (query) {
+          const isHideMode = hideToggle?.classList.contains('hide-mode');
+          applyFilter(isHideMode ? query + ' --hide' : query);
+        } else {
+          // No pills left, clear filter
+          clearFilter();
+        }
+      }
+    }
+  });
+
+  // Clear button
+  clearBtn?.addEventListener('click', () => {
+    clearFilter();
+  });
+
+  // Hide/dim toggle
+  hideToggle?.addEventListener('click', () => {
+    hideToggle.classList.toggle('hide-mode');
+    hideToggle.textContent = hideToggle.classList.contains('hide-mode') ? 'hide' : 'dim';
+
+    // Reapply current filter with new mode
+    const query = getCurrentQuery();
+    if (query) {
+      const isHideMode = hideToggle.classList.contains('hide-mode');
+      applyFilter(isHideMode ? query + ' --hide' : query);
+    }
+  });
+
+  // Global keyboard: "/" to focus search (when plan tab visible)
+  window.addEventListener('keydown', (e) => {
+    if (!planContainer || planContainer.style.display === 'none') return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (e.key === '/') {
+      e.preventDefault();
+      if (pillsContainer.children.length > 0) {
+        switchToEditMode();
+      } else {
+        searchInput.focus();
+        searchInput.select();
+      }
+    }
+  });
+}
+
 /**
  * Render the tree with SVG edges
  */
@@ -1290,7 +1991,8 @@ function renderTreeWithSVG(layout, graph) {
       const strokeWidth = calculateEdgeWidth(rowCountNumeric);
 
       // Draw the edge path with weighted width - use CSS variable for stroke
-      edgeSvg += `<path d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" fill="none" stroke="var(--text-secondary)" stroke-width="${strokeWidth.toFixed(1)}" stroke-linecap="round"/>`;
+      // Add data attributes for filtering
+      edgeSvg += `<path data-from="${edge.from}" data-to="${edge.to}" d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" fill="none" stroke="var(--text-secondary)" stroke-width="${strokeWidth.toFixed(1)}" stroke-linecap="round"/>`;
 
       if (rowCountFormatted) {
         // Calculate label position (on the bezier curve, slightly above midpoint)
@@ -1298,9 +2000,10 @@ function renderTreeWithSVG(layout, graph) {
         const labelY = midY - 5;
         const labelWidth = rowCountFormatted.length * 7 + 12;
 
+        // Add data-edge-label for filtering
         edgeSvg += `
-          <rect x="${labelX - labelWidth/2}" y="${labelY - 10}" width="${labelWidth}" height="18" rx="4" fill="var(--bg-secondary)" stroke="var(--border)" stroke-width="1"/>
-          <text x="${labelX}" y="${labelY + 2}" text-anchor="middle" fill="var(--info)" font-size="10" font-family="JetBrains Mono, monospace">${rowCountFormatted}</text>
+          <rect data-edge-label="${edge.from}-${edge.to}" x="${labelX - labelWidth/2}" y="${labelY - 10}" width="${labelWidth}" height="18" rx="4" fill="var(--bg-secondary)" stroke="var(--border)" stroke-width="1"/>
+          <text data-edge-label="${edge.from}-${edge.to}" x="${labelX}" y="${labelY + 2}" text-anchor="middle" fill="var(--info)" font-size="10" font-family="JetBrains Mono, monospace">${rowCountFormatted}</text>
         `;
       }
     }

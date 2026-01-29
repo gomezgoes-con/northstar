@@ -566,7 +566,8 @@ th.has-tooltip {
   font-size: 0.75rem;
   font-weight: 400;
   font-family: 'JetBrains Mono', monospace;
-  white-space: nowrap;
+  white-space: normal;
+  max-width: 320px;
   border: 1px solid var(--border);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 10000;
@@ -1292,6 +1293,277 @@ td.skew-danger {
 .minimap-node.join { background: var(--danger); }
 .minimap-node.exchange { background: var(--info); }
 .minimap-node.other { background: var(--text-secondary); }
+
+/* Plan Search Bar */
+.plan-search-bar {
+  position: absolute;
+  top: 80px;
+  left: 220px;  /* Right of minimap (180px + 24px + gap) */
+  display: none;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 300;
+}
+
+.plan-search-bar.visible { display: flex; }
+
+.plan-search-bar input {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  width: 220px;
+  outline: none;
+}
+
+.plan-search-bar input::placeholder {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+/* Filter area - contains pills and input */
+.search-filter-area {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  cursor: text;
+}
+
+/* Pills container - view mode */
+.filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.filter-pills:empty {
+  display: none;
+}
+
+/* Individual pill */
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.filter-pill .pill-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.7;
+  transition: all 0.15s;
+}
+
+.filter-pill .pill-remove:hover {
+  opacity: 1;
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+
+/* Operator between pills */
+.filter-operator {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0 2px;
+}
+
+.plan-search-bar .search-help {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: 50%;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.plan-search-bar .search-help:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Search help tooltip */
+.search-help-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.75rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 400;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  white-space: nowrap;
+}
+
+.plan-search-bar:has(.search-help:hover) .search-help-tooltip,
+.search-help-tooltip:hover {
+  opacity: 1;
+  visibility: visible;
+}
+
+.search-help-tooltip .help-section {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.search-help-tooltip .help-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.search-help-tooltip .help-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.search-help-tooltip code {
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+}
+
+.search-help-tooltip span {
+  color: var(--text-secondary);
+}
+
+.search-help-tooltip kbd {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  border: 1px solid var(--border);
+}
+
+.search-help-tooltip .help-keys {
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.plan-search-bar .search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.plan-search-bar .search-clear:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.plan-search-bar .search-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.plan-search-bar .search-toggle:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+}
+
+.plan-search-bar .search-toggle.hide-mode {
+  border-color: var(--warning);
+  color: var(--warning);
+  background: rgba(208, 135, 112, 0.1);
+}
+
+/* Filter state classes for plan nodes */
+.plan-node.filter-dimmed {
+  opacity: 0.15 !important;
+  pointer-events: none !important;
+}
+
+.plan-node.filter-dimmed:hover {
+  border-color: var(--border) !important;
+  box-shadow: none !important;
+}
+
+.plan-node.filter-hidden {
+  display: none !important;
+}
+
+.plan-node.filter-match {
+  box-shadow: 0 0 0 2px var(--accent), 0 0 12px var(--accent-dim) !important;
+}
+
+/* Filter state classes for SVG edges */
+.plan-svg path.filter-dimmed,
+.plan-svg rect.filter-dimmed,
+.plan-svg text.filter-dimmed {
+  opacity: 0.1;
+}
+
+.plan-svg path.filter-hidden,
+.plan-svg rect.filter-hidden,
+.plan-svg text.filter-hidden {
+  display: none;
+}
 
 .plan-svg-container {
   position: relative;
