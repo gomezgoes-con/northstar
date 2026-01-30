@@ -110,7 +110,7 @@ function renderQueryMeta(summary) {
  * Render Summary Cards (Organized in Sections)
  */
 function renderSummaryCards(scans, execution) {
-  // Calculate totals from CONNECTOR_SCAN operators
+  // Calculate totals from scan operators (CONNECTOR_SCAN or OLAP_SCAN)
   const totalScans = scans.length;
   const totalBytesRead = sumMetric(scans, 'BytesRead', 'unique');
   const totalRowsRead = sumMetric(scans, 'RowsRead', 'unique');
@@ -150,7 +150,7 @@ function renderSummaryCards(scans, execution) {
 
   // Scan Metrics Section
   const scanMetricCards = [
-    { label: 'Connector Scan Operators', value: totalScans, type: 'number' },
+    { label: 'Scan Operators', value: totalScans, type: 'number' },
     { label: 'Total Bytes Read', value: formatBytes(totalBytesRead), type: 'bytes' },
     { label: 'Total Rows Scanned', value: formatNumber(totalRawRows), type: 'rows' },
     { label: 'Total Rows Read', value: formatNumber(totalRowsRead), type: 'rows' },
