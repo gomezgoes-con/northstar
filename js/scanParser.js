@@ -3,56 +3,82 @@
  */
 
 /**
- * Recursively find all CONNECTOR_SCAN operators in the execution data
+ * Check if a key is a primary scan operator (CONNECTOR_SCAN or OLAP_SCAN, but not OLAP_SCAN_PREPARE)
+ * @param {string} key - The operator key to check
+ * @returns {boolean} - True if this is a primary scan operator
  */
-export function findConnectorScans(obj, path = '', context = {}) {
+function isPrimaryScanOperator(key) {
+  // Match CONNECTOR_SCAN (for external/Iceberg tables)
+  if (key.startsWith('CONNECTOR_SCAN')) {
+    return true;
+  }
+  // Match OLAP_SCAN but NOT OLAP_SCAN_PREPARE (for native StarRocks tables)
+  // The regex ensures we match "OLAP_SCAN (" but not "OLAP_SCAN_PREPARE ("
+  if (key.match(/^OLAP_SCAN \(/)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Recursively find all primary scan operators (CONNECTOR_SCAN, OLAP_SCAN) in the execution data
+ * Note: Excludes OLAP_SCAN_PREPARE which is a preparation phase operator with minimal metrics
+ */
+export function findScanOperators(obj, path = '', context = {}) {
   const results = [];
-  
+
   // Iterate through all keys in the object
   for (const key in obj) {
     const value = obj[key];
-    
+
     // Track context: extract fragment_id and pipeline_id from keys as we traverse
     let newContext = { ...context };
-    
+
     // Check if this key is a Fragment (e.g., "Fragment 0", "Fragment 1")
     const fragmentMatch = key.match(/^Fragment (\d+)$/);
     if (fragmentMatch) {
       newContext.fragmentId = fragmentMatch[1];
     }
-    
+
     // Check if this key is a Pipeline (e.g., "Pipeline (id=3)")
     const pipelineMatch = key.match(/^Pipeline \(id=(\d+)\)$/);
     if (pipelineMatch) {
       newContext.pipelineId = pipelineMatch[1];
     }
-    
-    // Check if this key is a CONNECTOR_SCAN operator
-    if (key.startsWith('CONNECTOR_SCAN')) {
-      // Extract the plan_node_id from the key, e.g., "CONNECTOR_SCAN (plan_node_id=66)"
+
+    // Check if this key is a primary scan operator (CONNECTOR_SCAN or OLAP_SCAN)
+    if (isPrimaryScanOperator(key)) {
+      // Extract the plan_node_id from the key, e.g., "CONNECTOR_SCAN (plan_node_id=66)" or "OLAP_SCAN (plan_node_id=11)"
       const match = key.match(/plan_node_id=(\d+)/);
       const planNodeId = match ? match[1] : 'unknown';
-      
+
+      // Extract operator type from key
+      const operatorType = key.startsWith('CONNECTOR_SCAN') ? 'CONNECTOR_SCAN' : 'OLAP_SCAN';
+
       results.push({
         id: planNodeId,
         planNodeId: planNodeId,
         pipelineId: newContext.pipelineId || 'unknown',
         fragmentId: newContext.fragmentId || 'unknown',
         path: path + ' > ' + key,
+        operatorType: operatorType,
         commonMetrics: value.CommonMetrics || {},
         uniqueMetrics: value.UniqueMetrics || {}
       });
     }
-    
+
     // If the value is an object, search recursively
     if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const nested = findConnectorScans(value, path ? `${path} > ${key}` : key, newContext);
+      const nested = findScanOperators(value, path ? `${path} > ${key}` : key, newContext);
       results.push(...nested);
     }
   }
-  
+
   return results;
 }
+
+// Backward compatibility alias
+export const findConnectorScans = findScanOperators;
 
 /**
  * Process a query profile JSON and extract relevant data
@@ -67,8 +93,8 @@ export function processQueryProfile(json) {
   const summary = query.Summary || {};
   const execution = query.Execution || {};
 
-  // Find all CONNECTOR_SCAN operators by recursively searching
-  const connectorScans = findConnectorScans(execution);
+  // Find all primary scan operators (CONNECTOR_SCAN or OLAP_SCAN) by recursively searching
+  const connectorScans = findScanOperators(execution);
 
   return { summary, execution, connectorScans };
 }

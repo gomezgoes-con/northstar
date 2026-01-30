@@ -767,9 +767,14 @@ window.navigateToRawJsonNode = function(planNodeId, operatorType = 'scan') {
   switchToTab('raw');
   // Give time for the tab to become visible
   setTimeout(() => {
-    const searchTerm = operatorType === 'join'
-      ? `HASH_JOIN_PROBE (plan_node_id=${planNodeId})`
-      : `CONNECTOR_SCAN (plan_node_id=${planNodeId})`;
+    let searchTerm;
+    if (operatorType === 'join') {
+      searchTerm = `HASH_JOIN_PROBE (plan_node_id=${planNodeId})`;
+    } else {
+      // Search pattern that matches both OLAP_SCAN and CONNECTOR_SCAN
+      // The pattern "_SCAN (plan_node_id=" will find either variant
+      searchTerm = `_SCAN (plan_node_id=${planNodeId})`;
+    }
     searchFor(searchTerm);
   }, 100);
 };

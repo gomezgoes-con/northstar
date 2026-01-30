@@ -766,32 +766,43 @@ function extractMetricsByPlanNodeId(execution) {
 
 /**
  * Get aggregated metrics for a scan operator
- * Looks through all instances to find the actual SCAN operator (not CHUNK_ACCUMULATE etc.)
+ * Looks through all instances to find the primary SCAN operator (OLAP_SCAN or CONNECTOR_SCAN)
+ * Excludes auxiliary operators like OLAP_SCAN_PREPARE, CHUNK_ACCUMULATE, etc.
  */
 function getScanMetrics(metricsData) {
   if (!metricsData || !metricsData.instances || metricsData.instances.length === 0) {
     return null;
   }
-  
-  // Find the SCAN instance (CONNECTOR_SCAN, OLAP_SCAN, etc.)
+
   let scanInstance = null;
-  
+
+  // Priority 1: Find exact OLAP_SCAN or CONNECTOR_SCAN (primary scan operators with full metrics)
   for (const inst of metricsData.instances) {
-    const opName = inst.operatorName.toUpperCase();
-    if (opName.includes('SCAN')) {
+    const opName = inst.operatorName;
+    if (opName === 'OLAP_SCAN' || opName === 'CONNECTOR_SCAN') {
       scanInstance = inst.metrics;
       break;
     }
   }
-  
-  // Fallback to first instance if no scan found
+
+  // Priority 2: Any operator containing SCAN as fallback (for unknown scan variants)
+  if (!scanInstance) {
+    for (const inst of metricsData.instances) {
+      if (inst.operatorName.toUpperCase().includes('SCAN')) {
+        scanInstance = inst.metrics;
+        break;
+      }
+    }
+  }
+
+  // Priority 3: First instance as final fallback
   if (!scanInstance) {
     scanInstance = metricsData.instances[0].metrics;
   }
-  
+
   const common = scanInstance.CommonMetrics || {};
   const unique = scanInstance.UniqueMetrics || {};
-  
+
   return {
     operatorTotalTime: common.OperatorTotalTime || 'N/A',
     pullRowNum: common.PullRowNum || '0',
