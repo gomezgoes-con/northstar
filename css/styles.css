@@ -1537,19 +1537,19 @@ td.skew-danger {
 .filter-summary {
   position: absolute;
   top: 80px;
-  right: 24px;
+  left: 540px;  /* Right of search bar */
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--bg-overlay);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   z-index: 300;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .filter-summary-count {
