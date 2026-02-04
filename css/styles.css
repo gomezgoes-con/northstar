@@ -1533,6 +1533,42 @@ td.skew-danger {
   background: rgba(208, 135, 112, 0.1);
 }
 
+/* Filter summary box - shows count and total time for filtered nodes */
+.filter-summary {
+  position: absolute;
+  top: 208px;  /* Below minimap (80px + 120px + 8px gap) */
+  left: 24px;
+  width: 180px;  /* Match minimap width */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 300;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.filter-summary-count {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.filter-summary-divider {
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+}
+
+.filter-summary-time {
+  color: var(--success);
+  font-weight: 600;
+}
+
 /* Filter state classes for plan nodes */
 .plan-node.filter-dimmed {
   opacity: 0.15 !important;

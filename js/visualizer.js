@@ -1911,6 +1911,9 @@ function applyFilter(query) {
     }
   }
 
+  // Update filter summary with count and total time
+  updateFilterSummary(matchingNodes);
+
   return matchingNodes;
 }
 
@@ -1928,6 +1931,55 @@ function resetFilterVisuals() {
   planCanvas?.querySelectorAll('.plan-svg path, .plan-svg rect, .plan-svg text').forEach(el => {
     el.classList.remove('filter-dimmed', 'filter-hidden');
   });
+
+  // Hide filter summary
+  updateFilterSummary(null);
+}
+
+/**
+ * Calculate total time for a set of nodes
+ * @param {Set<number>} nodeIds - Set of node IDs to sum
+ * @returns {number} - Total time in microseconds
+ */
+function calculateTotalTimeForNodes(nodeIds) {
+  if (!nodeIds || nodeIds.size === 0 || !currentGraph) return 0;
+
+  let totalUs = 0;
+  for (const id of nodeIds) {
+    const node = currentGraph[id];
+    if (!node || !node.metrics) continue;
+
+    const timeStr = getNodeTotalTime(node.metrics);
+    if (timeStr) {
+      totalUs += parseTimeToMicroseconds(timeStr);
+    }
+  }
+  return totalUs;
+}
+
+/**
+ * Update the filter summary display
+ * @param {Set<number>|null} matchingNodes - Set of matching node IDs, or null to hide
+ */
+function updateFilterSummary(matchingNodes) {
+  const summary = document.getElementById('filterSummary');
+  const countEl = document.getElementById('filterSummaryCount');
+  const timeEl = document.getElementById('filterSummaryTime');
+
+  if (!summary || !countEl || !timeEl) return;
+
+  if (!matchingNodes || matchingNodes.size === 0) {
+    summary.style.display = 'none';
+    return;
+  }
+
+  const count = matchingNodes.size;
+  const totalUs = calculateTotalTimeForNodes(matchingNodes);
+  const timeFormatted = totalUs > 0 ? formatMicroseconds(totalUs) : '0ms';
+
+  countEl.textContent = `${count} node${count !== 1 ? 's' : ''}`;
+  timeEl.textContent = timeFormatted;
+  summary.style.display = 'flex';
 }
 
 /**
@@ -1935,6 +1987,7 @@ function resetFilterVisuals() {
  */
 function clearFilter() {
   resetFilterVisuals();
+  updateFilterSummary(null);
 
   // Clear search input
   const searchInput = document.getElementById('planSearchInput');
