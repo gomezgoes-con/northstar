@@ -50,9 +50,21 @@ async function loadFromGist(url) {
   gistId = match[1].toLowerCase();
 
   // Always use GitHub API
-  const response = await fetch(`https://api.github.com/gists/${gistId}`);
+  let response;
+  try {
+    response = await fetch(`https://api.github.com/gists/${gistId}`);
+  } catch (networkError) {
+    throw new Error(`Network error loading Gist. Check your internet connection.`);
+  }
+
   if (!response.ok) {
-    throw new Error(`Failed to load Gist: ${response.statusText}`);
+    if (response.status === 404) {
+      throw new Error(`Gist not found. It may have been deleted or made private.`);
+    }
+    if (response.status === 403) {
+      throw new Error(`GitHub API rate limit exceeded. Try again later or use a dpaste link instead.`);
+    }
+    throw new Error(`Failed to load Gist: ${response.status} ${response.statusText}`);
   }
 
   const gist = await response.json();
@@ -76,25 +88,52 @@ async function loadFromDpaste(url) {
   // Add .txt to get raw content if not present
   const rawUrl = url.endsWith('.txt') ? url : `${url}.txt`;
 
-  const response = await fetch(rawUrl);
+  let response;
+  try {
+    response = await fetch(rawUrl);
+  } catch (networkError) {
+    // Network-level failure (CORS, offline, blocked by extension, etc.)
+    throw new Error(`Network error loading paste. Check your internet connection or try disabling ad blockers.`);
+  }
+
   if (!response.ok) {
-    throw new Error(`Failed to load paste: ${response.statusText}`);
+    if (response.status === 404) {
+      throw new Error(`Paste not found. It may have expired or been deleted.`);
+    }
+    if (response.status === 429) {
+      throw new Error(`Rate limited by dpaste.com. Please wait a moment and try again.`);
+    }
+    throw new Error(`Failed to load paste: ${response.status} ${response.statusText}`);
   }
 
   const content = await response.text();
-  return JSON.parse(content);
+  try {
+    return JSON.parse(content);
+  } catch (parseError) {
+    throw new Error(`Invalid JSON in paste. The paste may be corrupted.`);
+  }
 }
 
 /**
  * Load from raw JSON URL
  */
 async function loadFromRawUrl(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load URL: ${response.statusText}`);
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (networkError) {
+    throw new Error(`Network error loading URL. The server may not allow cross-origin requests.`);
   }
 
-  return await response.json();
+  if (!response.ok) {
+    throw new Error(`Failed to load URL: ${response.status} ${response.statusText}`);
+  }
+
+  try {
+    return await response.json();
+  } catch (parseError) {
+    throw new Error(`Invalid JSON response from URL.`);
+  }
 }
 
 /**
@@ -110,13 +149,21 @@ export async function shareToDpaste(queryJson) {
   formData.append('syntax', 'json');
   formData.append('expiry_days', '365'); // 1 year expiry
 
-  const response = await fetch('https://dpaste.com/api/', {
-    method: 'POST',
-    body: formData
-  });
+  let response;
+  try {
+    response = await fetch('https://dpaste.com/api/', {
+      method: 'POST',
+      body: formData
+    });
+  } catch (networkError) {
+    throw new Error(`Network error creating share link. Check your internet connection or try disabling ad blockers.`);
+  }
 
   if (!response.ok) {
-    throw new Error(`Failed to create paste: ${response.statusText}`);
+    if (response.status === 429) {
+      throw new Error(`Rate limited by dpaste.com. Please wait a moment and try again.`);
+    }
+    throw new Error(`Failed to create share link: ${response.status} ${response.statusText}`);
   }
 
   // dpaste returns the URL in the response text
